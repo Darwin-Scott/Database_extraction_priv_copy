@@ -1,0 +1,74 @@
+# config.yml
+
+source:
+  delimiter: auto          # auto | "," | ";" | "\t"
+  encoding: utf-8
+
+dedupe:
+  unique_key: profile_url  # used to avoid duplicates
+
+id:
+  prefix: "CAND_"
+  width: 7                 # CAND_0000123
+
+tables:
+  candidate:
+    pii_fields:
+      - profile_url
+      - full_name
+      - first_name
+      - last_name
+      - location_name
+      - industry
+      - address
+      - avatar
+    emails:
+      - email
+      - third_party_email_1
+      - third_party_email_2
+      - third_party_email_3
+    phones:
+      - phone_1
+      - phone_2
+    websites:
+      - website_1
+      - website_2
+      - website_3
+
+  candidate_profile_text:
+    fields:
+      - headline
+      - summary
+      - skills
+      - tags
+      - note
+      - languages
+    work_history:
+      max_items: 10
+      organization: "organization_{i}"
+      title: "organization_title_{i}"
+      description: "position_description_{i}"
+      start: "organization_start_{i}"
+      end: "organization_end_{i}"
+    education:
+      max_items: 5
+      school: "education_{i}"
+      degree: "education_degree_{i}"
+      fos: "education_fos_{i}"
+      description: "education_description_{i}"
+      start: "education_start_{i}"
+      end: "education_end_{i}"
+    language_list:
+      max_items: 10
+      name: "language_{i}"
+      proficiency: "language_proficiency_{i}"
+
+  candidate_messages:
+    fields:
+      - full_messaging_history
+      - last_sent_message_from
+      - last_sent_message_text
+      - last_received_message_from
+      - last_received_message_text
+      - last_sent_message_send_at
+      - last_received_message_send_at
