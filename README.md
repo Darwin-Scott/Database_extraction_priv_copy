@@ -1,23 +1,23 @@
 # database_project — Local-first Recruiting Database (CSV → SQLite)
 
-This repo contains a small ingestion pipeline to transform LinkedHelper/LinkedIn CSV exports into a local SQLite database.
+This repository contains scripts to transform LinkedHelper / LinkedIn CSV exports into a **local SQLite database** (`candidates.db`).
 
-## Goals
-- Local-first data processing (no cloud DB required)
-- Strict separation of:
-  - **PII / sensitive data** (stored locally in SQLite only)
-  - **matching text** (stored locally and later used for embeddings / LLM prompts)
-  - **messaging history** (stored locally only; never used for embeddings/LLM)
+The pipeline is designed to:
+- keep **PII and messaging** strictly local (SQLite only),
+- store **matching-relevant text** in a normalized structure,
+- enable later steps like vector search (Chroma/Qdrant) and LLM ranking.
 
-## Repository Contents
-- `schema.sql` — SQLite schema (tables)
-- `config.yml` — mapping configuration from CSV → normalized structure
-- `init_db.py` — creates the SQLite DB and applies schema
-- `import_csv.py` — imports a CSV into SQLite (dedupe by `profile_url`)
-- `check_db.py` — quick sanity checks
+---
+
+## Files
+
+- `schema.sql` — SQLite schema (tables + indexes)
+- `config.yml` — CSV → normalized mapping config
 - `requirements.txt` — Python dependencies
-
-> Note: CSV files and `.db` files are intentionally excluded from git via `.gitignore`.
+- `init_db.py` — creates/initializes the SQLite DB by applying `schema.sql`
+- `import_csv.py` — imports one CSV into SQLite (dedupe by `profile_url`)
+- `check_db.py` — prints DB tables, columns, indexes, counts, and sample rows
+- `extraction.py` — helper script to inspect CSV columns/examples (data exploration)
 
 ---
 
