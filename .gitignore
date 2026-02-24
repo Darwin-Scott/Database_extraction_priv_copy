@@ -40,3 +40,7 @@ temp/
 .env.*
 *.pem
 *.key
+
+
+# --- Sensitive results ---
+out/
