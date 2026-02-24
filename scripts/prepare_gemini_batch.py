@@ -1,4 +1,4 @@
-# prepare_gemini_batch.py
+# scripts/prepare_gemini_batch.py
 """
 Prepare a compact, anonymized batch payload for Gemini deep matching (Stage 2).
 
@@ -12,26 +12,27 @@ Outputs:
 - local/out/gemini_candidates_compact.jsonl (one candidate per line for debugging)
 
 Usage:
-  python prepare_gemini_batch.py "JOB DESCRIPTION HERE..."
-OR:
-  python prepare_gemini_batch.py  (will prompt for a job description)
+  python scripts/prepare_gemini_batch.py --job "JOB DESCRIPTION HERE..."
+  python scripts/prepare_gemini_batch.py "JOB DESCRIPTION HERE..."
+  python scripts/prepare_gemini_batch.py   (will prompt for a job description)
 
 Notes:
 - No PII is included (no names, no URLs, no emails/phones, no messages).
 - Uses candidate_profile_text only.
-- Cleans skills like "Skill : null".
+- Cleans skills like "Skill : null" or "Skill : 3".
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from dbx.paths import DB, OUT
+from typing import Any, Dict, List, Optional
 
+from dbx.paths import DB, OUT
 
 DB_PATH = DB
 TOP_IDS_PATH = OUT / "top500_ids.txt"
@@ -50,16 +51,12 @@ MAX_INFERRED_SKILLS = 6
 
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 URL_RE = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
-
-# Optional: remove common contact phrases that add risk
 CONTACT_HINT_RE = re.compile(r"\b(kontakt|contact|mail|e-mail|email|telefon|phone|mobil|whatsapp)\b", re.IGNORECASE)
 
 
 def scrub_pii(text: str) -> str:
-    # Remove URLs and emails completely
     text = URL_RE.sub("[URL_REMOVED]", text)
     text = EMAIL_RE.sub("[EMAIL_REMOVED]", text)
-    # If you want to be extra strict, drop contact-hint phrases
     text = CONTACT_HINT_RE.sub("[CONTACT_REMOVED]", text)
     return text
 
@@ -88,6 +85,7 @@ def clean_skill_token(tok: str) -> Optional[str]:
     tok = tok.strip()
     if not tok:
         return None
+    # remove trailing ": null" / ": none" / ": 3"
     tok = re.sub(r"\s*:\s*(null|none|\d+)\s*$", "", tok, flags=re.IGNORECASE)
     tok = tok.strip(" -–•\t")
     tok = norm_ws(tok)
@@ -210,12 +208,13 @@ def fmt_edu(edu_json: Optional[str], limit: int) -> str:
 
 def load_top_ids(path: Path) -> List[str]:
     if not path.exists():
-        raise FileNotFoundError(f"Missing {path}. Run search_chroma.py first.")
+        raise FileNotFoundError(f"Missing {path}. Run scripts/search_chroma.py first.")
     ids = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             ids.append(line)
+
     # de-dupe while keeping order
     seen = set()
     out = []
@@ -234,15 +233,13 @@ def fetch_profiles(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[str, D
     if not cand_ids:
         return {}
 
-    # SQLite IN has a parameter limit (~999). We're using 500, so it's fine.
     placeholders = ",".join(["?"] * len(cand_ids))
     query = f"""
         SELECT cand_id, headline, summary, skills_raw, languages_json, work_history_json, education_json, inferred_skills
         FROM candidate_profile_text
         WHERE cand_id IN ({placeholders})
     """
-    cur = conn.cursor()
-    rows = cur.execute(query, cand_ids).fetchall()
+    rows = conn.execute(query, cand_ids).fetchall()
 
     out: Dict[str, Dict[str, Any]] = {}
     for r in rows:
@@ -273,10 +270,8 @@ def build_compact_line(row: Dict[str, Any]) -> str:
     work = fmt_work(row.get("work_history_json"), MAX_WORK_ITEMS)
     edu = fmt_edu(row.get("education_json"), MAX_EDU_ITEMS)
 
-    # Very compact, pipe-separated.
-    # Keep labels short to reduce tokens.
+    # Pipe-separated; short labels to reduce tokens.
     parts = [f"{cid}"]
-
     if headline:
         parts.append(f"H:{headline}")
     if skills:
@@ -297,53 +292,22 @@ def build_compact_line(row: Dict[str, Any]) -> str:
     return line
 
 
-def read_job_description_from_cli_or_prompt() -> str:
-    jd = " ".join(sys.argv[1:]).strip()
-    if jd:
-        return jd
+def read_job_description_from_prompt() -> str:
     print("Paste job description (finish with an empty line):")
-    lines = []
+    lines: List[str] = []
     while True:
-        line = input()
+        try:
+            line = input()
+        except EOFError:
+            break
         if not line.strip():
             break
         lines.append(line)
     return "\n".join(lines).strip()
 
 
-def main():
-    OUT_DIR.mkdir(exist_ok=True)
-
-    job_description = read_job_description_from_cli_or_prompt()
-    if not job_description:
-        raise ValueError("Job description is empty.")
-
-    cand_ids = load_top_ids(TOP_IDS_PATH)
-
-    with sqlite3.connect(DB_PATH) as conn:
-        profiles = fetch_profiles(conn, cand_ids)
-
-    # Preserve original ranking order from top500_ids.txt
-    compact_rows: List[Dict[str, Any]] = []
-    compact_lines: List[str] = []
-
-    missing = 0
-    for cid in cand_ids:
-        row = profiles.get(cid)
-        if not row:
-            missing += 1
-            continue
-        line = build_compact_line(row)
-        compact_lines.append(line)
-        compact_rows.append({"cand_id": cid, "line": line})
-
-    # Write JSONL for debugging
-    with open(OUT_JSONL_PATH, "w", encoding="utf-8") as f:
-        for obj in compact_rows:
-            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-
-    # Build prompt text (you'll later send this to Gemini)
-    prompt = []
+def build_prompt(job_description: str, compact_lines: List[str]) -> str:
+    prompt: List[str] = []
     prompt.append("TASK: You are a recruiting matching engine.")
     prompt.append("You will receive a job description and a list of anonymized candidate mini-profiles.")
     prompt.append("Each candidate is identified ONLY by CAND_ID.")
@@ -359,27 +323,68 @@ def main():
     prompt.append("")
     prompt.append("CANDIDATES:")
     prompt.extend(compact_lines)
+    return "\n".join(prompt)
 
-    prompt_text = "\n".join(prompt)
 
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Prepare anonymized Gemini batch prompt from top500 Chroma IDs.")
+    ap.add_argument(
+        "--job",
+        type=str,
+        default="",
+        help="Job description text. If omitted, will use positional args or prompt interactively.",
+    )
+    ap.add_argument(
+        "job_positional",
+        nargs="*",
+        help="Optional job description as positional args (alternative to --job).",
+    )
+    args = ap.parse_args()
+
+    job_description = (args.job or " ".join(args.job_positional)).strip()
+    if not job_description:
+        job_description = read_job_description_from_prompt()
+    if not job_description:
+        raise SystemExit("Job description is empty. Provide --job \"...\" or paste it when prompted.")
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    cand_ids = load_top_ids(TOP_IDS_PATH)
+
+    with sqlite3.connect(DB_PATH) as conn:
+        profiles = fetch_profiles(conn, cand_ids)
+
+    missing = 0
+    compact_rows: List[Dict[str, Any]] = []
+    compact_lines: List[str] = []
+
+    for cid in cand_ids:
+        row = profiles.get(cid)
+        if not row:
+            missing += 1
+            continue
+        line = build_compact_line(row)
+        compact_lines.append(line)
+        compact_rows.append({"cand_id": cid, "line": line})
+
+    # JSONL for debugging
+    with open(OUT_JSONL_PATH, "w", encoding="utf-8") as f:
+        for obj in compact_rows:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    prompt_text = build_prompt(job_description, compact_lines)
     OUT_PROMPT_PATH.write_text(prompt_text, encoding="utf-8")
 
-    # Print summary
+    # Summary
     print(f"✅ Loaded top IDs: {len(cand_ids)}")
     print(f"✅ Candidates found in DB: {len(compact_lines)} (missing {missing})")
     print(f"✅ Wrote JSONL: {OUT_JSONL_PATH}")
     print(f"✅ Wrote prompt: {OUT_PROMPT_PATH}")
+    print(f"\nPrompt size (chars): {len(prompt_text):,}")
     print("\nFirst 3 candidate lines:")
     for l in compact_lines[:3]:
         print("  " + l)
 
-    # Rough token-ish size estimate (characters)
-    print(f"\nPrompt size (chars): {len(prompt_text):,}")
-    print("Next: implement gemini_rank.py to send this prompt to Gemini and parse JSON.")
-
 
 if __name__ == "__main__":
-    job = " ".join(sys.argv[1:]).strip()
-    if not job:
-        raise SystemExit("Provide job description as argument.")
-    main(job)
+    main()
