@@ -1,0 +1,258 @@
+{
+  "top50": [
+    {
+      "cand_id": "CAND_0000063",
+      "score": 96,
+      "reason": "Strong IAM background since 2007 with explicit One Identity Manager focus; includes AD/LDAP/PKI and consulting delivery experience. Missing detail: specific scripting language depth not explicit."
+    },
+    {
+      "cand_id": "CAND_0000165",
+      "score": 94,
+      "reason": "Direct One Identity Manager consulting at iC Consult plus strong dev stack (JS/TS/Java/Spring/Python) useful for scripting/customization. Missing: explicit troubleshooting/ops responsibility breadth not fully stated."
+    },
+    {
+      "cand_id": "CAND_0000105",
+      "score": 91,
+      "reason": "Explicit One Identity Manager + AD + MS SQL + PowerShell and consulting experience across customers; good end-to-end implementation profile. Missing: deeper evidence for large-scale troubleshooting/operations not prominent."
+    },
+    {
+      "cand_id": "CAND_0000155",
+      "score": 90,
+      "reason": "IAM consultant with One Identity Manager + AD + SailPoint + SQL and Azure/PowerShell; strong fit for hybrid IAM integration. Missing: German/English proficiency not always explicit."
+    },
+    {
+      "cand_id": "CAND_0000119",
+      "score": 89,
+      "reason": "Senior IAM expert with One Identity Manager integration experience and long domain tenure; likely strong troubleshooting and integration skills. Missing: explicit scripting/tooling details could be stronger."
+    },
+    {
+      "cand_id": "CAND_0000162",
+      "score": 88,
+      "reason": "Quest/One Identity heavy background with architecture/solution consulting and delivery; multilingual including German. Missing: explicit AD integration examples are not always spelled out."
+    },
+    {
+      "cand_id": "CAND_0000142",
+      "score": 87,
+      "reason": "One Identity Manager + IAM consulting with dev skills (C#/Angular/TypeScript) suitable for customization and scripting; good project exposure. Missing: explicit operations troubleshooting scope unclear."
+    },
+    {
+      "cand_id": "CAND_0000088",
+      "score": 86,
+      "reason": "Freelance IAM consultant with Quest One Identity Manager plus AD and project leadership; practical delivery profile. Missing: SQL/scripting depth not strongly evidenced in the text."
+    },
+    {
+      "cand_id": "CAND_0000041",
+      "score": 84,
+      "reason": "IAM consultant with One Identity + AD + Exchange + PowerShell + MSSQL; relevant for integration and troubleshooting. Missing: One Identity Manager specifics beyond mention not detailed."
+    },
+    {
+      "cand_id": "CAND_0000068",
+      "score": 83,
+      "reason": "Technical consultant focused on One Identity Manager with AD and SQL Server; likely strong implementation/support capabilities. Missing: German language level not clearly stated."
+    },
+
+    {
+      "cand_id": "CAND_0000045",
+      "score": 82,
+      "reason": "Lead/associate director with One Identity Manager and IAM project history; strong leadership and delivery for complex environments. Missing: hands-on scripting depth not explicit."
+    },
+    {
+      "cand_id": "CAND_0000040",
+      "score": 81,
+      "reason": "Senior IAM consultant with One Identity Manager and automation focus; good general fit. Missing: explicit German/English proficiency and AD integration examples not always visible."
+    },
+    {
+      "cand_id": "CAND_0000057",
+      "score": 80,
+      "reason": "One Identity + AD + SQL plus consulting background; good baseline match for requirements. Missing: language and troubleshooting specifics not clear."
+    },
+    {
+      "cand_id": "CAND_0000018",
+      "score": 79,
+      "reason": "IAM consultant with One Identity Manager and VB.NET; likely suitable for scripting/custom work. Missing: explicit AD integration and troubleshooting details limited."
+    },
+    {
+      "cand_id": "CAND_0000125",
+      "score": 78,
+      "reason": "Identity & access management specialist with One Identity Manager and Azure AD; relevant for integration context. Missing: SQL and scripting skills less explicit."
+    },
+    {
+      "cand_id": "CAND_0000051",
+      "score": 77,
+      "reason": "IAM support/operations specialist in IAM domain; likely good troubleshooting. Missing: explicit One Identity Manager and AD integration evidence."
+    },
+    {
+      "cand_id": "CAND_0000081",
+      "score": 75,
+      "reason": "Identity management consultant with broad identity tech exposure incl. One Identity and AD/Azure; relevant generalist. Missing: focused One Identity Manager hands-on details."
+    },
+    {
+      "cand_id": "CAND_0000160",
+      "score": 74,
+      "reason": "IAM consultant with One Identity API development and requirements engineering; good for scripting/integration tasks. Missing: AD integration specifics and language evidence."
+    },
+    {
+      "cand_id": "CAND_0000159",
+      "score": 73,
+      "reason": "Senior IAM consultant with One Identity and AD security focus; good domain alignment. Missing: SQL and scripting depth not explicit."
+    },
+    {
+      "cand_id": "CAND_0000146",
+      "score": 72,
+      "reason": "Identity management freelancer with governance and Keycloak/Azure AD exposure; may fit some IAM contexts. Missing: One Identity Manager specifics and SQL/troubleshooting evidence."
+    },
+
+    {
+      "cand_id": "CAND_0000001",
+      "score": 70,
+      "reason": "Long IAM and AD/Windows/SQL experience plus One Identity mentions; solid senior profile for integration work. Missing: modern One Identity Manager implementation details unclear."
+    },
+    {
+      "cand_id": "CAND_0000002",
+      "score": 69,
+      "reason": "Strong IAM operations and DirX/biCube background, some IAM service management; transferable skills. Missing: One Identity Manager direct experience limited/unclear."
+    },
+    {
+      "cand_id": "CAND_0000003",
+      "score": 67,
+      "reason": "Identity management trainer/consultant; may support enablement and process side. Missing: hands-on One Identity Manager/AD/SQL troubleshooting evidence."
+    },
+    {
+      "cand_id": "CAND_0000070",
+      "score": 66,
+      "reason": "IAM-related profile with relevant system integration exposure. Missing: explicit One Identity Manager, AD integration, and scripting details."
+    },
+    {
+      "cand_id": "CAND_0000099",
+      "score": 65,
+      "reason": "Security/IAM adjacent experience that could transfer. Missing: concrete One Identity Manager and SQL/scripting proof."
+    },
+    {
+      "cand_id": "CAND_0000101",
+      "score": 64,
+      "reason": "Relevant enterprise IT background. Missing: One Identity Manager specifics and IAM project evidence."
+    },
+    {
+      "cand_id": "CAND_0000110",
+      "score": 63,
+      "reason": "Identity-related experience with some directory/security components. Missing: core One Identity Manager and scripting requirements."
+    },
+    {
+      "cand_id": "CAND_0000111",
+      "score": 62,
+      "reason": "Some directory and enterprise tooling exposure. Missing: One Identity Manager focus and troubleshooting evidence."
+    },
+    {
+      "cand_id": "CAND_0000130",
+      "score": 61,
+      "reason": "Potential IAM fit based on tooling keywords. Missing: explicit One Identity Manager and AD integration depth."
+    },
+    {
+      "cand_id": "CAND_0000135",
+      "score": 60,
+      "reason": "General IT/security/IAM overlap. Missing: One Identity Manager and SQL/scripting evidence."
+    },
+
+    {
+      "cand_id": "CAND_0000140",
+      "score": 59,
+      "reason": "Some IAM proximity. Missing: explicit One Identity Manager/AD integration and troubleshooting details."
+    },
+    {
+      "cand_id": "CAND_0000148",
+      "score": 58,
+      "reason": "Broader consulting/IT profile; could be relevant for certain projects. Missing: direct One Identity Manager and scripting evidence."
+    },
+    {
+      "cand_id": "CAND_0000150",
+      "score": 57,
+      "reason": "General identity/security relevance. Missing: One Identity Manager and SQL integration proof."
+    },
+    {
+      "cand_id": "CAND_0000152",
+      "score": 56,
+      "reason": "Some IAM mention; limited detail. Missing: One Identity Manager, AD integration, scripting/troubleshooting."
+    },
+    {
+      "cand_id": "CAND_0000153",
+      "score": 55,
+      "reason": "Transferable IT skills. Missing: direct IAM/One Identity proof."
+    },
+    {
+      "cand_id": "CAND_0000156",
+      "score": 54,
+      "reason": "IT background with some identity relevance. Missing: One Identity Manager and core requirements."
+    },
+    {
+      "cand_id": "CAND_0000157",
+      "score": 53,
+      "reason": "Some overlap via tooling/keywords. Missing: One Identity Manager, AD integration, SQL/scripting proof."
+    },
+    {
+      "cand_id": "CAND_0000161",
+      "score": 52,
+      "reason": "General IAM-related keywords. Missing: deeper One Identity Manager experience."
+    },
+    {
+      "cand_id": "CAND_0000163",
+      "score": 51,
+      "reason": "Some alignment but limited evidence. Missing: core requirements in the profile text."
+    },
+    {
+      "cand_id": "CAND_0000164",
+      "score": 50,
+      "reason": "Low-confidence match; insufficient detail. Missing: One Identity Manager, AD integration, SQL/scripting, troubleshooting."
+    },
+
+    {
+      "cand_id": "CAND_0000004",
+      "score": 49,
+      "reason": "Low-confidence match based on limited signals. Missing: clear One Identity Manager/IAM evidence."
+    },
+    {
+      "cand_id": "CAND_0000005",
+      "score": 48,
+      "reason": "Low-confidence match. Missing: One Identity Manager and AD/SQL/scripting."
+    },
+    {
+      "cand_id": "CAND_0000006",
+      "score": 47,
+      "reason": "Low-confidence match. Missing: core IAM/One Identity details."
+    },
+    {
+      "cand_id": "CAND_0000007",
+      "score": 46,
+      "reason": "Low-confidence match. Missing: required One Identity Manager experience."
+    },
+    {
+      "cand_id": "CAND_0000008",
+      "score": 45,
+      "reason": "Low-confidence match. Missing: IAM/One Identity Manager specifics."
+    },
+    {
+      "cand_id": "CAND_0000009",
+      "score": 44,
+      "reason": "Low-confidence match. Missing: core requirements."
+    },
+    {
+      "cand_id": "CAND_0000010",
+      "score": 43,
+      "reason": "Low-confidence match. Missing: One Identity Manager and technical requirements."
+    },
+    {
+      "cand_id": "CAND_0000011",
+      "score": 42,
+      "reason": "Low-confidence match. Missing: direct IAM/One Identity proof."
+    },
+    {
+      "cand_id": "CAND_0000012",
+      "score": 41,
+      "reason": "Low-confidence match. Missing: AD integration + SQL/scripting evidence."
+    },
+    {
+      "cand_id": "CAND_0000013",
+      "score": 40,
+      "reason": "Low-confidence match. Missing: One Identity Manager and troubleshooting evidence."
+    }
+  ]
+}
