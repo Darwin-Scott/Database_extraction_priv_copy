@@ -3,6 +3,8 @@ local/
 out/
 chroma_db/
 data/
+sql/schema_selection.txt
+sql/schema_overview.txt
 *.db
 *.sqlite
 *.sqlite3

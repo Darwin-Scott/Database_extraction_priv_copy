@@ -5,6 +5,7 @@ import yaml
 import csv
 from pathlib import Path
 from datetime import datetime
+from dbx.paths import DB, RAW_DATA
 
 def detect_delimiter(csv_path, sample_bytes=20000):
     with open(csv_path, "r", encoding="utf-8", errors="replace", newline="") as f:
@@ -65,7 +66,7 @@ def build_languages(row, max_items=10):
     fallback = clean_value(row.get("languages"))
     return [{"name": fallback}] if fallback else []
 
-def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.yml", reset_db=False):
+def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_db=False):
     csv_path = Path(csv_path)
     cfg = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
 
@@ -290,6 +291,6 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
     print(f"ℹ️ Provenance: source_file={source_file}, source_imported_at={imported_at}")
 
 if __name__ == "__main__":
-    csv_file_path = r"DevOneIdent_170.csv"
+    csv_file_path = RAW_DATA / "DevOneIdent_170.csv"
     # Set reset_db=True ONLY if you want to wipe the DB tables before importing (dev mode)
     import_csv_to_sqlite(csv_file_path, reset_db=False)

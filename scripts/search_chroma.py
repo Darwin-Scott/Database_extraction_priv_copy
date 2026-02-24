@@ -17,15 +17,16 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
+from dbx.paths import CHROMA, OUT
 
 
-CHROMA_DIR = Path("chroma_db")
+CHROMA_DIR = CHROMA
 COLLECTION_NAME = "candidates_v1"
 EMBED_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 TOP_K = 500
 TOP_K_PRINT = 20
-OUT_IDS_PATH = Path("out") / "top500_ids.txt"
+OUT_IDS_PATH = OUT / "top500_ids.txt"
 
 
 def main():
@@ -71,7 +72,7 @@ def main():
 
     print("Next step: take the top 500 IDs (instead of top 20) for Gemini batch ranking.")
 
-    Path("out").mkdir(exist_ok=True)
+    OUT.mkdir(exist_ok=True)
 
     with open(OUT_IDS_PATH, "w", encoding="utf-8") as f:
         for cid in ids:

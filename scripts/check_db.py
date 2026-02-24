@@ -1,8 +1,9 @@
 import sqlite3
 import json
 from textwrap import shorten
+from dbx.paths import DB
 
-DB_PATH = "candidates.db"
+DB_PATH = DB
 
 def print_header(title: str):
     print("\n" + "=" * 80)

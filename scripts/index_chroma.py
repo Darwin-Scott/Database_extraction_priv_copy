@@ -3,10 +3,10 @@
 Index candidate documents into a local ChromaDB collection.
 
 Inputs:
-- out/candidates.jsonl (from build_documents.py)
+- candidates_path = OUT / "candidates.jsonl" (from build_documents.py)
 
 Outputs:
-- Local persistent Chroma DB stored in ./chroma_db
+- Local persistent Chroma DB stored in ./local/chroma_db
 
 Usage:
   python index_chroma.py
@@ -21,10 +21,11 @@ from typing import List, Dict, Any, Tuple
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+from dbx.paths import CHROMA, OUT
 
 
-JSONL_PATH = Path("out") / "candidates.jsonl"
-CHROMA_DIR = Path("chroma_db")
+JSONL_PATH = OUT / "candidates.jsonl"
+CHROMA_DIR = CHROMA
 COLLECTION_NAME = "candidates_v1"
 
 # Good multilingual default (works with German+English reasonably well).

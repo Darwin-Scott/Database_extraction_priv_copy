@@ -1,8 +1,9 @@
 import sqlite3
 from pathlib import Path
+from dbx.paths import DB, SCHEMA
 
-DB_PATH = "candidates.db"
-SCHEMA_PATH = "schema.sql"
+DB_PATH = DB
+SCHEMA_PATH = SCHEMA
 
 def column_exists(conn, table: str, column: str) -> bool:
     rows = conn.execute(f"PRAGMA table_info({table});").fetchall()

@@ -3,16 +3,16 @@
 Call Gemini to rank candidates (Stage 2: deep matching).
 
 Inputs:
-- out/gemini_batch.txt  (from prepare_gemini_batch.py)
+- local/out/gemini_batch.txt  (from prepare_gemini_batch.py)
 
 Outputs:
-- out/gemini_ranked_raw.txt   (raw model output)
-- out/gemini_ranked.json      (parsed JSON if possible)
+- local/out/gemini_ranked_raw.txt   (raw model output)
+- local/out/gemini_ranked.json      (parsed JSON if possible)
 
 Usage:
   python gemini_rank.py
   python gemini_rank.py --model gemini-2.0-flash
-  python gemini_rank.py --in out/gemini_batch.txt --out out/gemini_ranked.json
+  python gemini_rank.py --in local/out/gemini_batch.txt --out local/out/gemini_ranked.json
 
 Requirements:
   pip install google-genai
@@ -33,10 +33,12 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
+from dbx.paths import OUT
 
-DEFAULT_IN = Path("out") / "gemini_batch.txt"
-DEFAULT_OUT_JSON = Path("out") / "gemini_ranked.json"
-DEFAULT_OUT_RAW = Path("out") / "gemini_ranked_raw.txt"
+
+DEFAULT_IN = OUT / "gemini_batch.txt"
+DEFAULT_OUT_JSON = OUT / "gemini_ranked.json"
+DEFAULT_OUT_RAW = OUT / "gemini_ranked_raw.txt"
 
 # Choose a sane default; you can override with --model
 DEFAULT_MODEL = "gemini-2.0-flash"

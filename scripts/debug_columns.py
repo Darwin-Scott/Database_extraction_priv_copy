@@ -1,6 +1,7 @@
 import pandas as pd
 import csv
 from pathlib import Path
+from dbx.paths import RAW_DATA
 
 def detect_delimiter(csv_path, sample_bytes=20000):
     with open(csv_path, "r", encoding="utf-8", errors="replace", newline="") as f:
@@ -8,7 +9,7 @@ def detect_delimiter(csv_path, sample_bytes=20000):
     dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
     return dialect.delimiter
 
-csv_file_path = Path(r"DevOneIdent_170.csv")
+csv_file_path = RAW_DATA / "DevOneIdent_170.csv"
 delim = detect_delimiter(csv_file_path)
 
 df = pd.read_csv(

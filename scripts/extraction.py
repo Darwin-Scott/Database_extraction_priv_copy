@@ -1,6 +1,7 @@
 import csv
 import pandas as pd
 from pathlib import Path
+from dbx.paths import RAW_DATA
 
 def detect_delimiter(csv_path, sample_bytes=20000):
     """Detect delimiter using csv.Sniffer on a sample."""
@@ -46,5 +47,5 @@ def extract_schema_overview(csv_path, output_path="schema_overview.txt"):
     print(f"Schema overview written to: {out_path}")
 
 if __name__ == "__main__":
-    csv_file_path = r"DevOneIdent_170.csv"
+    csv_file_path = RAW_DATA / "DevOneIdent_170.csv"
     extract_schema_overview(csv_file_path)

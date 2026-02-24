@@ -3,20 +3,20 @@
 Stage 3: Re-identification + output rendering.
 
 Input:
-- out/gemini_ranked.json (Gemini output with cand_id, score, reason)
+- local/out/gemini_ranked.json (Gemini output with cand_id, score, reason)
 
 Reads local SQLite:
 - candidate (PII local)
 - candidate_profile_text (Category C local)
 
 Outputs:
-- out/top50_results.csv
-- out/top50_results.md
+- local/out/top50_results.csv
+- local/out/top50_results.md
 - prints top 10 to terminal
 
 Usage:
   python render_results.py
-  python render_results.py --in out/gemini_ranked.json --db candidates.db
+  python render_results.py --in local/out/gemini_ranked.json --db local/candidates.db
 """
 
 from __future__ import annotations
@@ -27,11 +27,12 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from dbx.paths import DB, OUT
 
 
-DEFAULT_DB = "candidates.db"
-DEFAULT_IN = Path("out") / "gemini_ranked.json"
-OUT_DIR = Path("out")
+DEFAULT_DB = str(DB)   # if used as argparse default
+DEFAULT_IN = OUT / "gemini_ranked.json"
+OUT_DIR = OUT
 OUT_CSV = OUT_DIR / "top50_results.csv"
 OUT_MD = OUT_DIR / "top50_results.md"
 

@@ -3,8 +3,8 @@
 Build anonymized, compact "matching documents" from the local SQLite DB.
 
 Output:
-- out/candidates.jsonl   (one JSON per line: {"cand_id": "...", "text": "...", "meta": {...}})
-- out/candidates_preview.txt (human-readable preview of the first N docs)
+- local/out/candidates.jsonl   (one JSON per line: {"cand_id": "...", "text": "...", "meta": {...}})
+- local/out/candidates_preview.txt (human-readable preview of the first N docs)
 
 Design goals (from briefing):
 - No PII (no names, emails, phones, addresses, profile_url, messages)
@@ -20,10 +20,11 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from dbx.paths import DB, OUT, CHROMA, SCHEMA, RAW_DATA
 
 
-DB_PATH = "candidates.db"
-OUT_DIR = Path("out")
+DB_PATH = DB
+OUT_DIR = OUT
 JSONL_PATH = OUT_DIR / "candidates.jsonl"
 PREVIEW_PATH = OUT_DIR / "candidates_preview.txt"
 
@@ -311,7 +312,7 @@ def main(db_path: str = DB_PATH):
     preview_lines.extend(examples)
     preview_lines.append("")
     preview_lines.append("=== Tip ===")
-    preview_lines.append("Open out/candidates.jsonl and inspect ~10 random entries to verify:")
+    preview_lines.append("Open local/out/candidates.jsonl and inspect ~10 random entries to verify:")
     preview_lines.append("- compactness")
     preview_lines.append("- no PII leakage (names/emails/phones/addresses/LinkedIn URLs)")
     preview_lines.append("- skills cleaned (no ': null')")

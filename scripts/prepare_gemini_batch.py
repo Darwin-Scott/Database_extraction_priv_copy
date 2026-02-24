@@ -3,13 +3,13 @@
 Prepare a compact, anonymized batch payload for Gemini deep matching (Stage 2).
 
 Inputs:
-- candidates.db
-- out/top500_ids.txt (from search_chroma.py)
+- local/candidates.db
+- local/out/top500_ids.txt (from search_chroma.py)
 - job description text (CLI arg or prompted)
 
 Outputs:
-- out/gemini_batch.txt                (prompt-ready text)
-- out/gemini_candidates_compact.jsonl (one candidate per line for debugging)
+- local/out/gemini_batch.txt                (prompt-ready text)
+- local/out/gemini_candidates_compact.jsonl (one candidate per line for debugging)
 
 Usage:
   python prepare_gemini_batch.py "JOB DESCRIPTION HERE..."
@@ -30,12 +30,13 @@ import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from dbx.paths import DB, OUT
 
 
-DB_PATH = "candidates.db"
-TOP_IDS_PATH = Path("out") / "top500_ids.txt"
+DB_PATH = DB
+TOP_IDS_PATH = OUT / "top500_ids.txt"
 
-OUT_DIR = Path("out")
+OUT_DIR = OUT
 OUT_PROMPT_PATH = OUT_DIR / "gemini_batch.txt"
 OUT_JSONL_PATH = OUT_DIR / "gemini_candidates_compact.jsonl"
 
