@@ -1,22 +1,3 @@
-<<<<<<< HEAD
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# CSV files
-*.csv
-
-# Virtual environments
-.venv/
-venv/
-
-# Python cache
-__pycache__/
-
-# Secrets
-.env
-=======
 # --- Python ---
 __pycache__/
 *.py[cod]
@@ -59,4 +40,3 @@ temp/
 .env.*
 *.pem
 *.key
->>>>>>> 520638f933a229504fdb48cc1654df5f7e2cd9c9
