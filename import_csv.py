@@ -4,6 +4,7 @@ import pandas as pd
 import yaml
 import csv
 from pathlib import Path
+from datetime import datetime
 
 def detect_delimiter(csv_path, sample_bytes=20000):
     with open(csv_path, "r", encoding="utf-8", errors="replace", newline="") as f:
@@ -42,7 +43,29 @@ def build_pattern_items(row, spec, max_items):
             items.append(item)
     return items
 
-def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.yml"):
+def build_languages(row, max_items=10):
+    """
+    Prefer structured columns: language_1..n + language_proficiency_1..n
+    Fallback to 'languages' if list is empty.
+    """
+    items = []
+    for i in range(1, max_items + 1):
+        lang = clean_value(row.get(f"language_{i}"))
+        prof = clean_value(row.get(f"language_proficiency_{i}"))
+        if lang:
+            entry = {"name": lang}
+            if prof:
+                entry["proficiency"] = prof
+            items.append(entry)
+
+    if items:
+        return items
+
+    # fallback
+    fallback = clean_value(row.get("languages"))
+    return [{"name": fallback}] if fallback else []
+
+def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.yml", reset_db=False):
     csv_path = Path(csv_path)
     cfg = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
 
@@ -54,15 +77,26 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
         engine="python",
         encoding=cfg["source"]["encoding"],
         encoding_errors="replace",
-        on_bad_lines="skip",
+        on_bad_lines="skip"
     )
 
     unique_key = cfg["dedupe"]["unique_key"]
     prefix = cfg["id"]["prefix"]
     width = int(cfg["id"]["width"])
 
+    imported_at = datetime.now().isoformat(timespec="seconds")
+    source_file = str(csv_path.name)
+
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys=ON;")
+
+        if reset_db:
+            # Clears all tables (dev mode). Keeps schema intact.
+            conn.execute("DELETE FROM candidate_messages;")
+            conn.execute("DELETE FROM candidate_profile_text;")
+            conn.execute("DELETE FROM candidate;")
+            conn.commit()
+            print("⚠️ Reset enabled: cleared existing tables before import.")
 
         # Preload existing profile_url → cand_id for dedupe
         existing = dict(conn.execute("SELECT profile_url, cand_id FROM candidate").fetchall())
@@ -82,7 +116,6 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
                 cand_id = existing[profile_url]
                 is_update = True
             else:
-                # simple new id: count+1 (good enough for now)
                 next_num = conn.execute("SELECT COUNT(*) FROM candidate").fetchone()[0] + 1
                 cand_id = f"{prefix}{next_num:0{width}d}"
                 existing[profile_url] = cand_id
@@ -101,9 +134,11 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
                 INSERT INTO candidate (
                   cand_id, profile_url, full_name, first_name, last_name,
                   location_name, industry, address, avatar,
-                  emails_json, phones_json, websites_json, updated_at
+                  emails_json, phones_json, websites_json,
+                  source_file, source_imported_at,
+                  updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(profile_url) DO UPDATE SET
                   full_name=excluded.full_name,
                   first_name=excluded.first_name,
@@ -115,6 +150,8 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
                   emails_json=excluded.emails_json,
                   phones_json=excluded.phones_json,
                   websites_json=excluded.websites_json,
+                  source_file=excluded.source_file,
+                  source_imported_at=excluded.source_imported_at,
                   updated_at=datetime('now')
                 """,
                 (
@@ -130,23 +167,20 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
                     json.dumps(emails, ensure_ascii=False),
                     json.dumps(phones, ensure_ascii=False),
                     json.dumps(websites, ensure_ascii=False),
+                    source_file,
+                    imported_at,
                 ),
             )
 
             # --- candidate_profile_text (matching content local) ---
-            prof_cfg = cfg["tables"]["candidate_profile_text"]
             headline = clean_value(row.get("headline"))
             summary = clean_value(row.get("summary"))
             skills = clean_value(row.get("skills"))
 
-            # languages: either "languages" or normalized list
-            language_items = build_pattern_items(
-                row,
-                {"name": prof_cfg["language_list"]["name"], "proficiency": prof_cfg["language_list"]["proficiency"]},
-                prof_cfg["language_list"]["max_items"],
-            )
-            languages_fallback = clean_value(row.get("languages"))
-            languages_json = language_items if language_items else ([{"name": languages_fallback}] if languages_fallback else [])
+            # robust languages
+            languages_json = build_languages(row, max_items=10)
+
+            prof_cfg = cfg["tables"]["candidate_profile_text"]
 
             work_items = build_pattern_items(
                 row,
@@ -212,7 +246,6 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
             msg_cfg = cfg["tables"]["candidate_messages"]["fields"]
             msg_data = {k: clean_value(row.get(k)) for k in msg_cfg}
 
-            # only insert if any message field exists
             if any(v is not None for v in msg_data.values()):
                 conn.execute(
                     """
@@ -254,7 +287,9 @@ def import_csv_to_sqlite(csv_path, db_path="candidates.db", config_path="config.
         conn.commit()
 
     print(f"✅ Import done. Inserted: {inserted}, Updated (deduped): {updated}, Rows read: {len(df)}")
+    print(f"ℹ️ Provenance: source_file={source_file}, source_imported_at={imported_at}")
 
 if __name__ == "__main__":
     csv_file_path = r"DevOneIdent_170.csv"
-    import_csv_to_sqlite(csv_file_path)
+    # Set reset_db=True ONLY if you want to wipe the DB tables before importing (dev mode)
+    import_csv_to_sqlite(csv_file_path, reset_db=False)

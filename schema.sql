@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS candidate (
   phones_json TEXT,
   websites_json TEXT,
 
+  source_file TEXT,
+  source_imported_at TEXT,
+
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
+
 );
 
 CREATE TABLE IF NOT EXISTS candidate_profile_text (
