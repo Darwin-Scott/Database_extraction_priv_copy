@@ -2,6 +2,7 @@
 local/
 out/
 chroma_db/
+data/
 *.db
 *.sqlite
 *.sqlite3
