@@ -379,4 +379,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    job = " ".join(sys.argv[1:]).strip()
+    if not job:
+        raise SystemExit("Provide job description as argument.")
+    main(job)

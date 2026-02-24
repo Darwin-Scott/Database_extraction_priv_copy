@@ -5,6 +5,7 @@ import yaml
 import csv
 from pathlib import Path
 from datetime import datetime
+import sys
 from dbx.paths import DB, RAW_DATA
 
 def detect_delimiter(csv_path, sample_bytes=20000):
@@ -291,6 +292,8 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
     print(f"ℹ️ Provenance: source_file={source_file}, source_imported_at={imported_at}")
 
 if __name__ == "__main__":
-    csv_file_path = RAW_DATA / "DevOneIdent_170.csv"
-    # Set reset_db=True ONLY if you want to wipe the DB tables before importing (dev mode)
-    import_csv_to_sqlite(csv_file_path, reset_db=False)
+    if len(sys.argv) > 1:
+        csv_file_path = sys.argv[1]
+    else:
+        csv_file_path = r"data\raw\DevOneIdent_170.csv"
+    import_csv_to_sqlite(csv_file_path)
