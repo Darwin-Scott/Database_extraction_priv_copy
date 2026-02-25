@@ -14,3 +14,15 @@ sql/schema_overview.txt
 venv/
 ENV/
 env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env

@@ -43,7 +43,7 @@ DEFAULT_IN = OUT / "gemini_batch.txt"
 DEFAULT_OUT_JSON = OUT / "gemini_ranked.json"
 DEFAULT_OUT_RAW = OUT / "gemini_ranked_raw.txt"
 
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 
 def approx_tokens_from_chars(n_chars: int) -> int:
@@ -167,7 +167,7 @@ def main():
     if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
         raise SystemExit("Missing GEMINI_API_KEY (or GOOGLE_API_KEY) env var.")
 
-    client = genai.Client()
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
 
     if args.ping:
         try:
