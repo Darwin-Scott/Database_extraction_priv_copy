@@ -43,7 +43,7 @@ DEFAULT_IN = OUT / "gemini_batch.txt"
 DEFAULT_OUT_JSON = OUT / "gemini_ranked.json"
 DEFAULT_OUT_RAW = OUT / "gemini_ranked_raw.txt"
 
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_MODEL = "gemini-2.5-flash-lite-preview-09-2025" # Tested, high confidence that this is the best cost-effective model for our purpose
 
 
 def approx_tokens_from_chars(n_chars: int) -> int:
@@ -53,25 +53,46 @@ def approx_tokens_from_chars(n_chars: int) -> int:
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
-    text = text.strip()
+    t = text.strip()
+
+    # Strip common markdown fences if present
+    t = re.sub(r"^```(?:json)?\s*", "", t.strip(), flags=re.IGNORECASE)
+    t = re.sub(r"\s*```$", "", t.strip())
+
+    # 1) Try full parse
     try:
-        obj = json.loads(text)
+        obj = json.loads(t)
         if isinstance(obj, dict):
             return obj
     except Exception:
         pass
 
-    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not m:
-        return None
+    # 2) Find ALL JSON objects by scanning braces and try parse largest-first
+    candidates: list[str] = []
+    stack = 0
+    start = None
+    for i, ch in enumerate(t):
+        if ch == "{":
+            if stack == 0:
+                start = i
+            stack += 1
+        elif ch == "}":
+            if stack > 0:
+                stack -= 1
+                if stack == 0 and start is not None:
+                    candidates.append(t[start : i + 1])
+                    start = None
 
-    candidate = m.group(0).strip()
-    try:
-        obj = json.loads(candidate)
-        if isinstance(obj, dict):
-            return obj
-    except Exception:
-        return None
+    # Try longer candidates first (most likely full object)
+    candidates.sort(key=len, reverse=True)
+    for c in candidates:
+        try:
+            obj = json.loads(c)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            continue
+
     return None
 
 
@@ -116,6 +137,7 @@ def main():
     parser.add_argument("--model", dest="model", default=DEFAULT_MODEL, help="Gemini model name (e.g., gemini-2.0-flash)")
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max_output_tokens", type=int, default=8192)
+    parser.add_argument("--usage-out", type=str, default="", help="Optional: write usage metadata JSON to this path.")
 
     parser.add_argument("--skip-if-exists", action="store_true", help="Skip API call if output JSON already exists.")
     parser.add_argument("--dry-run", action="store_true", help="Print prompt size + rough token estimate; no API call.")
@@ -206,6 +228,30 @@ def main():
             client.close()
         except Exception:
             pass
+
+    usage_obj = None
+    try:
+        # google-genai response typically exposes usage metadata
+        # We keep this defensive because SDK versions vary.
+        um = getattr(resp, "usage_metadata", None)
+        if um is not None:
+            usage_obj = {
+                "prompt_token_count": getattr(um, "prompt_token_count", None),
+                "candidates_token_count": getattr(um, "candidates_token_count", None),
+                "total_token_count": getattr(um, "total_token_count", None),
+            }
+        else:
+            # Some versions expose "usage" or nested dicts
+            u = getattr(resp, "usage", None)
+            if isinstance(u, dict):
+                usage_obj = u
+    except Exception:
+        usage_obj = None
+
+    if args.usage_out and usage_obj is not None:
+        Path(args.usage_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.usage_out).write_text(json.dumps(usage_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"✅ Wrote usage: {args.usage_out}")
 
     raw_text = (resp.text or "").strip()
     out_raw.write_text(raw_text, encoding="utf-8")

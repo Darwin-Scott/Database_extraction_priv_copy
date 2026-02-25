@@ -3,8 +3,8 @@
 Minimal Streamlit UI for the pipeline.
 
 Flow:
-1) Put CSVs into data/raw -> click "Import CSVs into DB"
-2) Enter semantic query + job description -> click "Run Matching Pipeline"
+1) Put CSVs into data/raw -> optionally reset DB -> click "Import CSVs into DB"
+2) Enter semantic query + job description + gemini model -> click "Run Matching Pipeline"
 3) See output table + downloads
 
 Run:
@@ -35,6 +35,22 @@ MD_OUT = OUT / "top50_results.md"
 GEMINI_JSON = OUT / "gemini_ranked.json"
 
 
+# --- Gemini model options (curated, + custom) ---
+# These names may evolve; "Custom…" lets you paste any model name.
+GEMINI_MODELS = [
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-pro-preview-customtools",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash-lite-preview-09-2025",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "Custom…",
+]
+
+
 def _env_utf8() -> dict:
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
@@ -61,7 +77,6 @@ def newest_csvs(raw_dir: Path) -> list[Path]:
     if not raw_dir.exists():
         return []
     files = [p for p in raw_dir.glob("*.csv") if p.is_file()]
-    # stable order: newest first
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return files
 
@@ -82,6 +97,10 @@ def load_results() -> pd.DataFrame | None:
         return None
 
 
+def have_api_key() -> bool:
+    return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+
+
 st.set_page_config(page_title="Recruiting Pipeline", layout="wide")
 st.title("Recruiting Pipeline")
 st.caption("Simple UI: import CSVs → run matching pipeline → view results.")
@@ -94,21 +113,11 @@ with st.sidebar:
     st.write(f"Last results CSV: `{fmt_ts(CSV_OUT)}`")
     st.write(f"Gemini JSON exists: {'✅' if GEMINI_JSON.exists() else '❌'}")
     st.write(f"Output dir: `{OUT}`")
+    st.write(f"API key present: {'✅' if have_api_key() else '❌'}")
 
 st.divider()
 
-# ========== STEP 1 ==========
-st.subheader("1) Import CSVs into DB")
-st.write("Put one or more `.csv` files into `data/raw/`, then click the button below.")
-
-csvs = newest_csvs(RAW_DIR)
-if not csvs:
-    st.warning(f"No CSVs found in {RAW_DIR}")
-else:
-    st.info(f"Found {len(csvs)} CSV(s) in {RAW_DIR}. Newest: `{csvs[0].name}`")
-
-import_btn = st.button("📥 Import CSVs into DB", use_container_width=True)
-
+# Log area
 log = st.empty()
 if "log" not in st.session_state:
     st.session_state["log"] = ""
@@ -121,50 +130,91 @@ def append_log(s: str) -> None:
 
 py = sys.executable
 
+# ========== STEP 1 ==========
+st.subheader("1) Import CSVs into DB")
+st.write("Put one or more `.csv` files into `data/raw/`, then click the button below.")
+
+csvs = newest_csvs(RAW_DIR)
+if not csvs:
+    st.warning(f"No CSVs found in {RAW_DIR}")
+else:
+    st.info(f"Found {len(csvs)} CSV(s) in {RAW_DIR}. Newest: `{csvs[0].name}`")
+
+c_reset, c_btn = st.columns([1, 2], vertical_alignment="center")
+with c_reset:
+    reset_db = st.checkbox("Reset DB before import (DANGER)", value=False)
+with c_btn:
+    import_btn = st.button("📥 Import CSVs into DB", use_container_width=True)
+
 if import_btn:
     if not csvs:
         st.error("No CSV files to import.")
-    else:
-        OUT.mkdir(parents=True, exist_ok=True)
+        st.stop()
 
-        # Ensure DB exists: init_db first if missing
-        if not DB_PATH.exists():
-            append_log("=== init_db.py ===")
-            rc, out = run_cmd([py, str(SCRIPTS / "init_db.py")])
-            append_log(out)
-            if rc != 0:
-                st.error("init_db.py failed. See logs.")
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    # Optional DB reset
+    if reset_db:
+        append_log("=== RESET DB (delete local/candidates.db) ===")
+        if DB_PATH.exists():
+            try:
+                DB_PATH.unlink()
+                append_log(f"Deleted: {DB_PATH}")
+            except Exception as e:
+                append_log(f"Failed deleting DB: {e}")
+                st.error("Could not delete DB. See logs.")
                 st.stop()
+        else:
+            append_log("DB did not exist; nothing to delete.")
 
-        # Import ALL CSVs (newest -> oldest)
-        # NOTE: This assumes your import_csv.py supports argv: python import_csv.py <path>
-        # If not, we’ll adjust import_csv.py next (small change).
-        for p in reversed(csvs):  # oldest first so the “latest” overwrites last if needed
-            append_log(f"=== import_csv.py {p.name} ===")
-            rc, out = run_cmd([py, str(SCRIPTS / "import_csv.py"), str(p)])
-            append_log(out)
-            if rc != 0:
-                st.error(f"Import failed for {p.name}. See logs.")
-                st.stop()
+    # Ensure DB exists: init_db if missing
+    if not DB_PATH.exists():
+        append_log("=== init_db.py ===")
+        rc, out = run_cmd([py, str(SCRIPTS / "init_db.py")])
+        append_log(out)
+        if rc != 0:
+            st.error("init_db.py failed. See logs.")
+            st.stop()
 
-        st.success("CSV import finished.")
+    # Import ALL CSVs (oldest first so newer updates can overwrite)
+    # Assumes: python scripts/import_csv.py <path>
+    for p in reversed(csvs):
+        append_log(f"=== import_csv.py {p.name} ===")
+        rc, out = run_cmd([py, str(SCRIPTS / "import_csv.py"), str(p)])
+        append_log(out)
+        if rc != 0:
+            st.error(f"Import failed for {p.name}. See logs.")
+            st.stop()
+
+    st.success("CSV import finished.")
 
 st.divider()
 
 # ========== STEP 2 ==========
 st.subheader("2) Run Matching Pipeline")
+
 search_query = st.text_area(
     "Semantic search query",
     value="One Identity IAM Consultant Active Directory",
     height=80,
 )
+
 job_desc = st.text_area(
     "Job description",
     value="One Identity IAM Consultant. Requirements: One Identity Manager, AD integration, SQL, scripting, troubleshooting, German/English.",
     height=120,
 )
 
-use_gemini = st.checkbox("Use Gemini ranking (costs credits)", value=False)
+mcol1, mcol2 = st.columns([1, 2], vertical_alignment="center")
+with mcol1:
+    use_gemini = st.checkbox("Use Gemini ranking (costs credits)", value=False)
+with mcol2:
+    selected_model = st.selectbox("Gemini model", options=GEMINI_MODELS, index=6)
+
+custom_model = ""
+if selected_model == "Custom…":
+    custom_model = st.text_input("Custom model name", value="gemini-2.5-flash-lite")
+
 run_btn = st.button("▶️ Run Matching Pipeline", use_container_width=True)
 
 if run_btn:
@@ -174,6 +224,9 @@ if run_btn:
 
     OUT.mkdir(parents=True, exist_ok=True)
 
+    # Decide model name
+    model_name = custom_model.strip() if selected_model == "Custom…" else selected_model
+
     # Search -> batch -> (optional gemini) -> render
     steps: list[tuple[str, list[str]]] = [
         ("search_chroma.py", [py, str(SCRIPTS / "search_chroma.py"), search_query.strip()]),
@@ -181,9 +234,11 @@ if run_btn:
     ]
 
     if use_gemini:
-        steps.append(("gemini_rank.py", [py, str(SCRIPTS / "gemini_rank.py")]))
+        if not have_api_key():
+            st.error("Gemini is enabled, but no GEMINI_API_KEY / GOOGLE_API_KEY found in env.")
+            st.stop()
+        steps.append(("gemini_rank.py", [py, str(SCRIPTS / "gemini_rank.py"), "--model", model_name]))
     else:
-        # If skipping Gemini, we require an existing gemini_ranked.json to render meaningful results.
         if not GEMINI_JSON.exists():
             st.warning(
                 "Gemini is OFF, but `local/out/gemini_ranked.json` is missing. "
