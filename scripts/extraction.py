@@ -47,5 +47,5 @@ def extract_schema_overview(csv_path, output_path="schema_overview.txt"):
     print(f"Schema overview written to: {out_path}")
 
 if __name__ == "__main__":
-    csv_file_path = RAW_DATA / "DevOneIdent_170.csv"
+    csv_file_path = RAW_DATA / "otw_alt_IAM_0226.csv"
     extract_schema_overview(csv_file_path)

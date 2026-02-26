@@ -1,14 +1,17 @@
 import sqlite3
 import json
 from textwrap import shorten
+from collections import OrderedDict
 from dbx.paths import DB
 
 DB_PATH = DB
 
+
 def print_header(title: str):
-    print("\n" + "=" * 80)
+    print("\n" + "=" * 100)
     print(title)
-    print("=" * 80)
+    print("=" * 100)
+
 
 def list_tables(conn):
     cur = conn.cursor()
@@ -18,134 +21,202 @@ def list_tables(conn):
         ORDER BY name;
     """).fetchall()]
 
+
 def table_columns(conn, table):
     cur = conn.cursor()
-    rows = cur.execute(f"PRAGMA table_info({table});").fetchall()
-    # (cid, name, type, notnull, dflt_value, pk)
-    return rows
+    return cur.execute(f"PRAGMA table_info({table});").fetchall()
 
-def table_indexes(conn, table):
-    cur = conn.cursor()
-    idxs = cur.execute(f"PRAGMA index_list({table});").fetchall()
-    # (seq, name, unique, origin, partial)
-    details = []
-    for idx in idxs:
-        idx_name = idx[1]
-        cols = cur.execute(f"PRAGMA index_info({idx_name});").fetchall()
-        # (seqno, cid, name)
-        details.append((idx, cols))
-    return details
 
 def count_rows(conn, table):
     cur = conn.cursor()
     return cur.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0]
 
+
+def column_exists(conn, table, col):
+    cols = [r[1] for r in table_columns(conn, table)]
+    return col in cols
+
+
+def safe_scalar(conn, sql, params=()):
+    cur = conn.cursor()
+    row = cur.execute(sql, params).fetchone()
+    return row[0] if row else None
+
+
+def print_kv(d: dict, indent=0):
+    pad = " " * indent
+    for k, v in d.items():
+        print(f"{pad}{k}: {v}")
+
+
 def sample_rows(conn, table, limit=2):
     cur = conn.cursor()
     return cur.execute(f"SELECT * FROM {table} LIMIT {limit};").fetchall()
 
+
+def compact_row(row: sqlite3.Row, width=120):
+    items = []
+    for k in row.keys():
+        v = row[k]
+        if isinstance(v, str):
+            v2 = shorten(v, width=width, placeholder="...")
+        else:
+            v2 = v
+        items.append(f"{k}={v2}")
+    return " | ".join(items)
+
+
 def main():
     with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row  # nicer access by column name
+        conn.row_factory = sqlite3.Row
 
-        # 1) tables overview
-        print_header(f"SQLite DB: {DB_PATH}")
         tables = list_tables(conn)
-        print("Tables found:", ", ".join(tables) if tables else "(none)")
+        print_header(f"DB SNAPSHOT: {DB_PATH}")
+        print("Tables:", ", ".join(tables) if tables else "(none)")
 
-        # 2) schema per table
+        # --- Quick totals ---
+        print_header("Row counts per table")
+        counts = OrderedDict()
         for t in tables:
-            print_header(f"Schema for table: {t}")
-            cols = table_columns(conn, t)
-            print(f"Columns ({len(cols)}):")
-            for cid, name, coltype, notnull, dflt, pk in cols:
-                nn = "NOT NULL" if notnull else ""
-                pk_s = "PK" if pk else ""
-                dflt_s = f"DEFAULT {dflt}" if dflt is not None else ""
-                meta = " ".join(x for x in [coltype, nn, dflt_s, pk_s] if x)
-                print(f" - {name} [{meta}]")
+            counts[t] = count_rows(conn, t)
+        print_kv(counts)
 
-            # indexes
-            idx_details = table_indexes(conn, t)
-            if idx_details:
-                print("\nIndexes:")
-                for (seq, idx_name, unique, origin, partial), cols in idx_details:
-                    colnames = [c[2] for c in cols]
-                    uniq = "UNIQUE" if unique else ""
-                    print(f" - {idx_name} ({', '.join(colnames)}) {uniq}".rstrip())
-            else:
-                print("\nIndexes: (none)")
+        # --- Provenance / multi-CSV proof ---
+        if "candidate" in tables and column_exists(conn, "candidate", "source_file"):
+            print_header("Provenance: source_file distribution (proof of multi-CSV ingest)")
+            cur = conn.cursor()
+            rows = cur.execute("""
+                SELECT source_file, COUNT(*) AS n
+                FROM candidate
+                GROUP BY source_file
+                ORDER BY n DESC, source_file ASC;
+            """).fetchall()
 
-            # row count
-            n = count_rows(conn, t)
-            print(f"\nRow count: {n}")
-
-            # sample rows (compact)
-            rows = sample_rows(conn, t, limit=2)
-            print("\nSample rows (first 2):")
             if not rows:
-                print(" (no rows)")
+                print("(no candidates)")
+            else:
+                total = sum(r["n"] for r in rows)
+                print(f"Distinct source_file: {len(rows)} | Total candidates: {total}")
+                for r in rows:
+                    print(f"- {r['source_file']}: {r['n']}")
+
+        if "candidate" in tables and column_exists(conn, "candidate", "source_imported_at"):
+            print_header("Provenance: import time range")
+            min_ts = safe_scalar(conn, "SELECT MIN(source_imported_at) FROM candidate;")
+            max_ts = safe_scalar(conn, "SELECT MAX(source_imported_at) FROM candidate;")
+            print(f"First import timestamp: {min_ts}")
+            print(f"Last  import timestamp: {max_ts}")
+
+        # --- Join/coverage checks ---
+        print_header("Coverage checks")
+        cov = OrderedDict()
+        if "candidate" in tables:
+            cov["candidate_total"] = safe_scalar(conn, "SELECT COUNT(*) FROM candidate;")
+
+        if "candidate_profile_text" in tables:
+            cov["profile_text_total"] = safe_scalar(conn, "SELECT COUNT(*) FROM candidate_profile_text;")
+            cov["candidates_with_profile_text"] = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM candidate c
+                JOIN candidate_profile_text pt ON pt.cand_id = c.cand_id;
+            """)
+            cov["candidates_missing_profile_text"] = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM candidate c
+                LEFT JOIN candidate_profile_text pt ON pt.cand_id = c.cand_id
+                WHERE pt.cand_id IS NULL;
+            """)
+
+            # languages filled
+            cov["profile_text_with_languages_json"] = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM candidate_profile_text
+                WHERE languages_json IS NOT NULL AND languages_json != '[]';
+            """)
+
+        if "candidate_messages" in tables:
+            cov["messages_total"] = safe_scalar(conn, "SELECT COUNT(*) FROM candidate_messages;")
+            cov["candidates_with_messages_row"] = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM candidate c
+                JOIN candidate_messages m ON m.cand_id = c.cand_id;
+            """)
+
+        print_kv(cov)
+
+        # --- “Are we deduping?” quick signals ---
+        print_header("Dedupe / uniqueness sanity")
+        if "candidate" in tables:
+            # profile_url should be unique by schema; check anyway
+            dup = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT profile_url, COUNT(*) n
+                    FROM candidate
+                    GROUP BY profile_url
+                    HAVING n > 1
+                );
+            """)
+            print(f"profile_url duplicates found: {dup}")
+
+            # cand_id duplicates
+            dup_id = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT cand_id, COUNT(*) n
+                    FROM candidate
+                    GROUP BY cand_id
+                    HAVING n > 1
+                );
+            """)
+            print(f"cand_id duplicates found: {dup_id}")
+
+        # --- Per-table schema + samples (optional but useful) ---
+        print_header("Samples (first 2 rows per table)")
+        for t in tables:
+            print(f"\n[{t}] rows={counts[t]}")
+            rows = sample_rows(conn, t, limit=2)
+            if not rows:
+                print("  (no rows)")
             else:
                 for r in rows:
-                    # compact print: show key=value pairs, truncate long text
-                    items = []
-                    for k in r.keys():
-                        v = r[k]
-                        if isinstance(v, str):
-                            v2 = shorten(v, width=120, placeholder="...")
-                        else:
-                            v2 = v
-                        items.append(f"{k}={v2}")
-                    print("  - " + " | ".join(items))
+                    print("  - " + compact_row(r))
 
-        # 3) Extra: show one joined sample + JSON lengths (your earlier checks)
-        print_header("Join sanity check (candidate + candidate_profile_text)")
-        cur = conn.cursor()
-        row = cur.execute("""
-            SELECT c.cand_id, c.full_name, c.profile_url, pt.headline,
-                   pt.languages_json, pt.work_history_json, pt.education_json
-            FROM candidate c
-            LEFT JOIN candidate_profile_text pt ON pt.cand_id = c.cand_id
-            LIMIT 1
-        """).fetchone()
+        # --- Extra: show a few missing-profile examples (actionable debug) ---
+        if "candidate" in tables and "candidate_profile_text" in tables:
+            print_header("Examples: candidates missing profile_text (up to 10)")
+            cur = conn.cursor()
+            rows = cur.execute("""
+                SELECT c.cand_id, c.full_name, c.profile_url, c.source_file
+                FROM candidate c
+                LEFT JOIN candidate_profile_text pt ON pt.cand_id = c.cand_id
+                WHERE pt.cand_id IS NULL
+                LIMIT 10;
+            """).fetchall()
+            if not rows:
+                print("(none)")
+            else:
+                for r in rows:
+                    print(f"- {r['cand_id']} | {r['full_name']} | {r['source_file']} | {r['profile_url']}")
 
-        if row:
-            print("cand_id:", row[0])
-            print("full_name:", row[1])
-            print("profile_url:", row[2])
-            print("headline:", row[3])
+        # --- Languages examples ---
+        if "candidate_profile_text" in tables:
+            print_header("Examples: languages_json filled (up to 5)")
+            cur = conn.cursor()
+            rows = cur.execute("""
+                SELECT cand_id, languages_json
+                FROM candidate_profile_text
+                WHERE languages_json IS NOT NULL AND languages_json != '[]'
+                LIMIT 5;
+            """).fetchall()
+            if not rows:
+                print("(none)")
+            else:
+                for r in rows:
+                    print(f"- {r['cand_id']}: {r['languages_json']}")
 
-            langs = json.loads(row[4]) if row[4] else []
-            work = json.loads(row[5]) if row[5] else []
-            edu = json.loads(row[6]) if row[6] else []
-            print("\nParsed JSON lengths:")
-            print("languages:", len(langs), "work_history:", len(work), "education:", len(edu))
-        print_header("Languages coverage check")
+        print_header("Done")
 
-        cur = conn.cursor()
-
-        # How many have languages_json not empty?
-        n_with_lang = cur.execute("""
-            SELECT COUNT(*)
-            FROM candidate_profile_text
-            WHERE languages_json IS NOT NULL AND languages_json != '[]'
-        """).fetchone()[0]
-
-        n_total = cur.execute("SELECT COUNT(*) FROM candidate_profile_text").fetchone()[0]
-
-        print(f"Profiles with languages_json filled: {n_with_lang}/{n_total}")
-
-        # Show a few examples where languages exist
-        rows = cur.execute("""
-            SELECT cand_id, languages_json
-            FROM candidate_profile_text
-            WHERE languages_json IS NOT NULL AND languages_json != '[]'
-            LIMIT 5
-        """).fetchall()
-
-        print("\nExamples (first 5 with languages):")
-        for r in rows:
-            print(f"- {r[0]}: {r[1]}")
 
 if __name__ == "__main__":
     main()

@@ -63,4 +63,14 @@ CREATE TABLE IF NOT EXISTS candidate_messages (
   FOREIGN KEY (cand_id) REFERENCES candidate(cand_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS import_journal (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_file TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  rows_read INTEGER NOT NULL,
+  rows_with_unique_key INTEGER NOT NULL,
+  inserted INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_candidate_profile_url ON candidate(profile_url);

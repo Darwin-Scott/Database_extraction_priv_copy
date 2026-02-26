@@ -76,17 +76,43 @@ def newest_csv(raw_dir: Path) -> Path:
         raise FileNotFoundError(f"No CSV files found in {raw_dir}")
     return candidates[0]
 
+def all_csvs(raw_dir: Path) -> list[Path]:
+    if not raw_dir.exists():
+        raise FileNotFoundError(f"Missing raw data folder: {raw_dir}")
+    files = [p for p in raw_dir.glob("*.csv") if p.is_file()]
+    files.sort(key=lambda p: p.stat().st_mtime)  # oldest -> newest
+    if not files:
+        raise FileNotFoundError(f"No CSV files found in {raw_dir}")
+    return files
+
 
 def reset_local(local_dir: Path) -> None:
-    """Delete local db/chroma/out safely (DANGER)."""
-    if local_dir.exists():
-        print(f"⚠️ RESET: deleting selected items under {local_dir}")
-        for name in ["candidates.db", "chroma_db", "out"]:
-            target = local_dir / name
-            if target.is_file():
-                target.unlink()
-            elif target.is_dir():
-                shutil.rmtree(target)
+    """Delete local db/chroma and ephemeral outputs (DANGER)."""
+    if not local_dir.exists():
+        return
+
+    print(f"⚠️ RESET: deleting selected items under {local_dir}")
+
+    # Always wipe DB + chroma (core state)
+    for name in ["candidates.db", "chroma_db"]:
+        target = local_dir / name
+        if target.is_file():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
+
+    # Selectively wipe ephemeral outputs, keep experiment/history folders
+    out_dir = local_dir / "out"
+    if out_dir.exists() and out_dir.is_dir():
+        keep_dirs = {"model_comparison", "model_comparison_bundle", "recruiter_packets", "mock"}
+        for p in out_dir.iterdir():
+            if p.is_dir() and p.name in keep_dirs:
+                continue
+            # delete everything else in out/
+            if p.is_file():
+                p.unlink()
+            else:
+                shutil.rmtree(p)
 
 
 def ensure_dirs() -> None:
@@ -139,6 +165,7 @@ def main() -> None:
     ap.add_argument("--init-db", action="store_true", help="Initialize SQLite DB (scripts/init_db.py).")
     ap.add_argument("--import-csv", action="store_true", help="Import latest CSV from data/raw into SQLite (scripts/import_csv.py).")
     ap.add_argument("--csv", type=str, default="", help="Optional explicit CSV path. Otherwise newest in data/raw.")
+    ap.add_argument("--import-all-csvs", action="store_true", help="Import ALL CSVs from data/raw (oldest->newest). Overrides --csv/newest behavior.")
 
     ap.add_argument("--build-docs", action="store_true", help="Build candidates.jsonl from SQLite (scripts/build_documents.py).")
     ap.add_argument("--index", action="store_true", help="Index candidates.jsonl into Chroma (scripts/index_chroma.py).")
@@ -189,16 +216,23 @@ def main() -> None:
         print("\n✅ Gemini ping completed.")
         return
 
-    # Resolve CSV path if needed
-    csv_path: Path | None = None
+    # Resolve CSV paths if needed
+    csv_paths: list[Path] = []
     if args.import_csv:
-        if args.csv:
-            csv_path = Path(args.csv).expanduser().resolve()
-            if not csv_path.exists():
-                raise FileNotFoundError(f"CSV not found: {csv_path}")
+        if args.import_all_csvs:
+            csv_paths = all_csvs(RAW)
+            print(f"📄 Using ALL CSVs ({len(csv_paths)}):")
+            for p in csv_paths:
+                print(f"  - {p.name}")
         else:
-            csv_path = newest_csv(RAW)
-        print(f"📄 Using CSV: {csv_path}")
+            if args.csv:
+                p = Path(args.csv).expanduser().resolve()
+                if not p.exists():
+                    raise FileNotFoundError(f"CSV not found: {p}")
+                csv_paths = [p]
+            else:
+                csv_paths = [newest_csv(RAW)]
+            print(f"📄 Using CSV: {csv_paths[0]}")
 
     # --- Run steps ---
     if args.init_db:
@@ -206,10 +240,8 @@ def main() -> None:
 
     if args.import_csv:
         import_script = SCRIPTS / "import_csv.py"
-        if csv_path:
-            run([py, str(import_script), str(csv_path)], cwd=ROOT)
-        else:
-            run([py, str(import_script)], cwd=ROOT)
+        for p in csv_paths:
+            run([py, str(import_script), str(p)], cwd=ROOT)
 
     if args.build_docs:
         run([py, str(SCRIPTS / "build_documents.py")], cwd=ROOT)
