@@ -306,17 +306,21 @@ def read_job_description_from_prompt() -> str:
     return "\n".join(lines).strip()
 
 
-def build_prompt(job_description: str, compact_lines: List[str]) -> str:
+def build_prompt(job_description: str, compact_lines: List[str], rank_n: int = 50, explain_n: int = 20) -> str:
     prompt: List[str] = []
     prompt.append("TASK: You are a recruiting matching engine.")
     prompt.append("You will receive a job description and a list of anonymized candidate mini-profiles.")
     prompt.append("Each candidate is identified ONLY by CAND_ID.")
     prompt.append("")
     prompt.append("INSTRUCTIONS:")
-    prompt.append("1) Rank the BEST 50 candidates for this job.")
-    prompt.append("2) For the TOP 20, provide 1-2 short sentences explaining fit and missing requirements.")
+    prompt.append(f"1) Rank the BEST {rank_n} candidates for this job.")
+    if explain_n > 0:
+        prompt.append(f"2) For the TOP {explain_n}, provide 1-2 short sentences explaining fit and missing requirements.")
+    else:
+        prompt.append("2) Do NOT include explanations (reasons can be empty or omitted).")
     prompt.append("3) Output STRICT JSON only, no markdown.")
-    prompt.append('4) JSON format: {"top50":[{"cand_id":"CAND_...","score":0-100,"reason":"..."},...]}')
+    key = f"top{rank_n}"
+    prompt.append(f'4) JSON format: {{"{key}":[{{"cand_id":"CAND_...","score":0-100,"reason":"..."}}]}}')
     prompt.append("")
     prompt.append("JOB_DESCRIPTION:")
     prompt.append(job_description.strip())
@@ -327,7 +331,7 @@ def build_prompt(job_description: str, compact_lines: List[str]) -> str:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Prepare anonymized Gemini batch prompt from top500 Chroma IDs.")
+    ap = argparse.ArgumentParser(description="Prepare anonymized Gemini batch prompt from Chroma IDs.")
     ap.add_argument(
         "--job",
         type=str,
@@ -339,6 +343,37 @@ def main() -> None:
         nargs="*",
         help="Optional job description as positional args (alternative to --job).",
     )
+
+    # NEW: control how many candidates we include from the ID file
+    ap.add_argument(
+        "--top-n",
+        type=int,
+        default=500,
+        help="How many candidate IDs (from the ids file) to include in the prompt (default: 500).",
+    )
+
+    # NEW: control what we ask Gemini to return
+    ap.add_argument(
+        "--rank-n",
+        type=int,
+        default=50,
+        help="How many candidates Gemini should rank in the JSON output (default: 50).",
+    )
+    ap.add_argument(
+        "--explain-n",
+        type=int,
+        default=20,
+        help="For how many top candidates to provide short reasoning (default: 20).",
+    )
+
+    # NEW: allow using different id files e.g. top1200_ids.txt
+    ap.add_argument(
+        "--ids-path",
+        type=str,
+        default="",
+        help="Optional path to ids file. Default: local/out/top500_ids.txt",
+    )
+
     args = ap.parse_args()
 
     job_description = (args.job or " ".join(args.job_positional)).strip()
@@ -347,9 +382,20 @@ def main() -> None:
     if not job_description:
         raise SystemExit("Job description is empty. Provide --job \"...\" or paste it when prompted.")
 
+    if args.top_n <= 0:
+        raise SystemExit("--top-n must be > 0")
+    if args.rank_n <= 0:
+        raise SystemExit("--rank-n must be > 0")
+    if args.explain_n < 0:
+        raise SystemExit("--explain-n must be >= 0")
+    if args.explain_n > args.rank_n:
+        print("⚠️ --explain-n is greater than --rank-n; capping explain-n to rank-n.")
+        args.explain_n = args.rank_n
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    cand_ids = load_top_ids(TOP_IDS_PATH)
+    ids_path = Path(args.ids_path).expanduser().resolve() if args.ids_path else TOP_IDS_PATH
+    cand_ids = load_top_ids(ids_path)[: args.top_n]
 
     with sqlite3.connect(DB_PATH) as conn:
         profiles = fetch_profiles(conn, cand_ids)
@@ -372,11 +418,12 @@ def main() -> None:
         for obj in compact_rows:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
-    prompt_text = build_prompt(job_description, compact_lines)
+    prompt_text = build_prompt(job_description, compact_lines, rank_n=args.rank_n, explain_n=args.explain_n)
     OUT_PROMPT_PATH.write_text(prompt_text, encoding="utf-8")
 
     # Summary
-    print(f"✅ Loaded top IDs: {len(cand_ids)}")
+    print(f"✅ Loaded IDs from: {ids_path}")
+    print(f"✅ Using top-n IDs: {len(cand_ids)} (requested {args.top_n})")
     print(f"✅ Candidates found in DB: {len(compact_lines)} (missing {missing})")
     print(f"✅ Wrote JSONL: {OUT_JSONL_PATH}")
     print(f"✅ Wrote prompt: {OUT_PROMPT_PATH}")

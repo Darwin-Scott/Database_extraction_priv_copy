@@ -2,27 +2,22 @@
 """
 End-to-end pipeline runner.
 
+Now supports configurable:
+- Chroma search top-k (how many IDs to write)
+- Gemini prompt input top-n (how many candidate lines to include)
+- Gemini output rank-n + explain-n (how many results in JSON + how many reasons)
+
 Examples:
 
-# Full rebuild (DANGER: resets local DB/Chroma/out) + run everything
-python scripts/run_pipeline.py --all --reset-local --search "One Identity IAM Consultant Active Directory" --job "One Identity IAM Consultant. Requirements: One Identity Manager, AD integration, SQL, scripting, troubleshooting, German/English."
+# Full rebuild + run everything, 800 IDs, include 800 in prompt, ask Gemini for top100
+python scripts/run_pipeline.py --all --reset-local --import-all-csvs \
+  --top-k 800 --top-n 800 --rank-n 100 --explain-n 30 \
+  --search "One Identity IAM Consultant Active Directory" \
+  --job "..."
 
-# Run only search + prepare batch + render (assumes db+chroma exist; no gemini call)
-python scripts/run_pipeline.py --search "One Identity IAM Consultant Active Directory" --job "..." --prepare-batch --gemini skip --render
-
-# Run with mock gemini outputs (no credits)
-python scripts/run_pipeline.py --search "One Identity IAM Consultant Active Directory" --job "..." --prepare-batch --gemini mock --render
-
-# Run with a specific mock JSON file (no credits)
-python scripts/run_pipeline.py --gemini mock --mock-json local/out/mock/my_mock_ranked.json --render
-
-# Only check whether Gemini can be called (billing/quota sanity)
-python scripts/run_pipeline.py --ping-gemini
-
-Notes:
-- This runner calls existing scripts as subprocesses.
-- Folder layout assumed:
-  scripts/, src/dbx/paths.py, local/, data/raw/, sql/
+# Use existing DB/Chroma, just search+prepare+gemini+render
+python scripts/run_pipeline.py --search "..." --prepare-batch --gemini real --render \
+  --top-k 500 --top-n 300 --rank-n 50 --explain-n 20 --job "..."
 """
 
 from __future__ import annotations
@@ -36,7 +31,6 @@ from pathlib import Path
 
 
 def project_root() -> Path:
-    # scripts/run_pipeline.py -> repo root
     return Path(__file__).resolve().parents[1]
 
 
@@ -57,7 +51,6 @@ REAL_RAW = OUT / "gemini_ranked_raw.txt"
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> None:
-    """Run a subprocess command, fail fast with useful output."""
     print("\n" + " ".join(cmd))
     r = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
     if r.returncode != 0:
@@ -76,6 +69,7 @@ def newest_csv(raw_dir: Path) -> Path:
         raise FileNotFoundError(f"No CSV files found in {raw_dir}")
     return candidates[0]
 
+
 def all_csvs(raw_dir: Path) -> list[Path]:
     if not raw_dir.exists():
         raise FileNotFoundError(f"Missing raw data folder: {raw_dir}")
@@ -87,13 +81,11 @@ def all_csvs(raw_dir: Path) -> list[Path]:
 
 
 def reset_local(local_dir: Path) -> None:
-    """Delete local db/chroma and ephemeral outputs (DANGER)."""
     if not local_dir.exists():
         return
 
     print(f"⚠️ RESET: deleting selected items under {local_dir}")
 
-    # Always wipe DB + chroma (core state)
     for name in ["candidates.db", "chroma_db"]:
         target = local_dir / name
         if target.is_file():
@@ -101,14 +93,12 @@ def reset_local(local_dir: Path) -> None:
         elif target.is_dir():
             shutil.rmtree(target)
 
-    # Selectively wipe ephemeral outputs, keep experiment/history folders
     out_dir = local_dir / "out"
     if out_dir.exists() and out_dir.is_dir():
         keep_dirs = {"model_comparison", "model_comparison_bundle", "recruiter_packets", "mock"}
         for p in out_dir.iterdir():
             if p.is_dir() and p.name in keep_dirs:
                 continue
-            # delete everything else in out/
             if p.is_file():
                 p.unlink()
             else:
@@ -125,24 +115,15 @@ def have_api_key() -> bool:
     return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
 
 
-def apply_mock_outputs(mock_json: Path | None = None, mock_raw: Path | None = None) -> None:
-    """
-    Copy mock gemini outputs into the 'real' output locations.
-
-    Priority:
-    1) If mock_json is provided: copy it -> REAL_JSON and mirror to REAL_RAW
-    2) Else: use default mock folder files (MOCK_JSON_DEFAULT + MOCK_RAW_DEFAULT)
-    """
+def apply_mock_outputs(mock_json: Path | None = None) -> None:
     if mock_json:
         if not mock_json.exists():
             raise FileNotFoundError(f"Mock JSON not found: {mock_json}")
         REAL_JSON.write_text(mock_json.read_text(encoding="utf-8"), encoding="utf-8")
-        # mirror raw as the same JSON content (good enough for pipeline)
         REAL_RAW.write_text(mock_json.read_text(encoding="utf-8"), encoding="utf-8")
         print(f"✅ Using MOCK Gemini JSON:\n  {mock_json}\n→ {REAL_JSON}")
         return
 
-    # Default mock directory mode:
     if not MOCK_JSON_DEFAULT.exists() or not MOCK_RAW_DEFAULT.exists():
         raise FileNotFoundError(
             "Missing mock outputs. Expected:\n"
@@ -165,14 +146,30 @@ def main() -> None:
     ap.add_argument("--init-db", action="store_true", help="Initialize SQLite DB (scripts/init_db.py).")
     ap.add_argument("--import-csv", action="store_true", help="Import latest CSV from data/raw into SQLite (scripts/import_csv.py).")
     ap.add_argument("--csv", type=str, default="", help="Optional explicit CSV path. Otherwise newest in data/raw.")
-    ap.add_argument("--import-all-csvs", action="store_true", help="Import ALL CSVs from data/raw (oldest->newest). Overrides --csv/newest behavior.")
+    ap.add_argument("--import-all-csvs", action="store_true", help="Import ALL CSVs from data/raw (oldest->newest).")
 
     ap.add_argument("--build-docs", action="store_true", help="Build candidates.jsonl from SQLite (scripts/build_documents.py).")
     ap.add_argument("--index", action="store_true", help="Index candidates.jsonl into Chroma (scripts/index_chroma.py).")
-    ap.add_argument("--search", type=str, default="", help="Semantic search query (scripts/search_chroma.py). Writes top500_ids.txt.")
+
+    ap.add_argument("--search", type=str, default="", help="Semantic search query (scripts/search_chroma.py). Writes top{K}_ids.txt.")
     ap.add_argument("--job", type=str, default="", help="Job description text for gemini batch prompt.")
-    ap.add_argument("--prepare-batch", action="store_true", help="Prepare gemini_batch.txt using job + top500 ids.")
-    ap.add_argument("--render", action="store_true", help="Render top50_results.csv/md (scripts/render_results.py).")
+    ap.add_argument("--prepare-batch", action="store_true", help="Prepare gemini_batch.txt using job + ids.")
+    ap.add_argument("--render", action="store_true", help="Render topN_results.csv/md (scripts/render_results.py).")
+    # add near other args
+    ap.add_argument(
+        "--search-mode",
+        choices=["subprocess", "inproc"],
+        default="subprocess",
+        help="How to run the Chroma search step. inproc avoids spawning a new Python process (minor win).",
+    )
+
+    # NEW knobs
+    ap.add_argument("--top-k", type=int, default=500, help="How many IDs search_chroma writes (default 500).")
+    ap.add_argument("--print-k", type=int, default=20, help="How many results search_chroma prints (default 20).")
+    ap.add_argument("--ids-path", type=str, default="", help="Optional path to ids file to use for prepare step.")
+    ap.add_argument("--top-n", type=int, default=500, help="How many IDs from the ids file to include in Gemini prompt.")
+    ap.add_argument("--rank-n", type=int, default=50, help="How many results Gemini should output in JSON (top{N}).")
+    ap.add_argument("--explain-n", type=int, default=20, help="How many top candidates should include explanations.")
 
     ap.add_argument(
         "--gemini",
@@ -191,7 +188,6 @@ def main() -> None:
 
     args = ap.parse_args()
 
-    # Expand --all into the canonical sequence
     if args.all:
         args.init_db = True
         args.import_csv = True
@@ -201,22 +197,20 @@ def main() -> None:
             args.search = "IAM Consultant One Identity Active Directory"
         args.prepare_batch = True
         args.render = True
-        # Gemini behavior handled by --gemini (default auto)
 
     if args.reset_local:
         reset_local(LOCAL)
 
     ensure_dirs()
 
-    py = sys.executable  # uses current venv python
+    py = sys.executable
 
-    # Optional: just test gemini connectivity/billing and exit
     if args.ping_gemini:
         run([py, str(SCRIPTS / "gemini_rank.py"), "--ping"], cwd=ROOT)
         print("\n✅ Gemini ping completed.")
         return
 
-    # Resolve CSV paths if needed
+    # CSV paths
     csv_paths: list[Path] = []
     if args.import_csv:
         if args.import_all_csvs:
@@ -249,13 +243,54 @@ def main() -> None:
     if args.index:
         run([py, str(SCRIPTS / "index_chroma.py")], cwd=ROOT)
 
+    # Search step: write top{K}_ids.txt unless ids-path is provided and you want to skip search
+    ids_path_effective = ""
     if args.search:
-        run([py, str(SCRIPTS / "search_chroma.py"), args.search], cwd=ROOT)
+        out_name = f"top{int(args.top_k)}_ids.txt"
+        out_path = OUT / out_name
+
+        if args.search_mode == "inproc":
+            # Run in-process (won't persist across separate CLI invocations, but avoids extra subprocess)
+            from scripts.search_chroma import search_chroma_inproc
+
+            search_chroma_inproc(
+                query=args.search,
+                persist_dir=CHROMA,              # local/chroma_db
+                top_k=int(args.top_k),
+                print_k=int(args.print_k),
+                out_path=out_path,
+                log=print,
+            )
+        else:
+            # Run as subprocess (current behavior)
+            run(
+                [
+                    py,
+                    str(SCRIPTS / "search_chroma.py"),
+                    "--top-k",
+                    str(int(args.top_k)),
+                    "--print-k",
+                    str(int(args.print_k)),
+                    "--out",
+                    str(out_path),
+                    args.search,
+                ],
+                cwd=ROOT,
+            )
+
+        ids_path_effective = str(out_path)
+
+    elif args.ids_path:
+        ids_path_effective = args.ids_path
 
     if args.prepare_batch:
         if not args.job:
             raise SystemExit('Missing --job. Example: --job "One Identity IAM Consultant..."')
-        run([py, str(SCRIPTS / "prepare_gemini_batch.py"), args.job], cwd=ROOT)
+
+        cmd = [py, str(SCRIPTS / "prepare_gemini_batch.py"), "--top-n", str(int(args.top_n)), "--rank-n", str(int(args.rank_n)), "--explain-n", str(int(args.explain_n)), "--job", args.job]
+        if ids_path_effective:
+            cmd += ["--ids-path", ids_path_effective]
+        run(cmd, cwd=ROOT)
 
     # --- Gemini stage ---
     gemini_mode = args.gemini
@@ -265,7 +300,7 @@ def main() -> None:
     if gemini_mode == "real":
         if not have_api_key():
             raise SystemExit("Missing GEMINI_API_KEY (or GOOGLE_API_KEY). Set it or use --gemini mock/skip.")
-        run([py, str(SCRIPTS / "gemini_rank.py")], cwd=ROOT)
+        run([py, str(SCRIPTS / "gemini_rank.py"), "--rank-n", str(int(args.rank_n))], cwd=ROOT)
 
     elif gemini_mode == "mock":
         mock_json_path = Path(args.mock_json).expanduser().resolve() if args.mock_json else None
@@ -278,7 +313,6 @@ def main() -> None:
             print("Either run Gemini once, or use --gemini mock with mock files present.")
             raise SystemExit(2)
 
-    # --- Render ---
     if args.render:
         run([py, str(SCRIPTS / "render_results.py")], cwd=ROOT)
 

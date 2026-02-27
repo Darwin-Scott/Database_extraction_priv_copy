@@ -17,11 +17,9 @@ Usage:
   python scripts/gemini_rank.py --ping
   python scripts/gemini_rank.py --mock local/out/mock_gemini_ranked.json
 
-Requirements:
-  pip install google-genai
-
-API Key:
-  Set env var GEMINI_API_KEY (or GOOGLE_API_KEY)
+Optional (new):
+  python scripts/gemini_rank.py --rank-n 100
+  python scripts/gemini_rank.py --rank-key top100
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from google import genai
 from google.genai import types
@@ -43,23 +41,18 @@ DEFAULT_IN = OUT / "gemini_batch.txt"
 DEFAULT_OUT_JSON = OUT / "gemini_ranked.json"
 DEFAULT_OUT_RAW = OUT / "gemini_ranked_raw.txt"
 
-DEFAULT_MODEL = "gemini-2.5-flash-lite-preview-09-2025" # Tested, high confidence that this is the best cost-effective model for our purpose
+DEFAULT_MODEL = "gemini-2.5-flash-lite-preview-09-2025"  # cost-effective default
 
 
 def approx_tokens_from_chars(n_chars: int) -> int:
-    # Very rough heuristic. Good enough for sanity checks.
-    # English often ~4 chars/token; German sometimes ~3-5.
     return max(1, n_chars // 4)
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     t = text.strip()
-
-    # Strip common markdown fences if present
     t = re.sub(r"^```(?:json)?\s*", "", t.strip(), flags=re.IGNORECASE)
     t = re.sub(r"\s*```$", "", t.strip())
 
-    # 1) Try full parse
     try:
         obj = json.loads(t)
         if isinstance(obj, dict):
@@ -67,7 +60,6 @@ def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
 
-    # 2) Find ALL JSON objects by scanning braces and try parse largest-first
     candidates: list[str] = []
     stack = 0
     start = None
@@ -83,7 +75,6 @@ def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
                     candidates.append(t[start : i + 1])
                     start = None
 
-    # Try longer candidates first (most likely full object)
     candidates.sort(key=len, reverse=True)
     for c in candidates:
         try:
@@ -97,7 +88,6 @@ def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
 
 
 def nice_quota_hint(err_text: str) -> str:
-    # The SDK error text includes "free_tier" metrics in your case.
     if "free_tier" in err_text.lower():
         return (
             "\nLikely cause:\n"
@@ -109,7 +99,7 @@ def nice_quota_hint(err_text: str) -> str:
         return (
             "\nLikely cause:\n"
             "- Quota / rate limit hit (requests per minute/day or input token per minute).\n"
-            "- Try again later or reduce TOP_K (fewer candidates) / shorten prompt.\n"
+            "- Try again later or reduce number of candidates / shorten prompt.\n"
         )
     return ""
 
@@ -123,10 +113,34 @@ def do_ping(client: genai.Client, model: str) -> None:
     )
     resp = client.models.generate_content(
         model=model,
-        contents='{"ping":true,"msg":"reply with {\"ok\":true}"}',
+        contents='{"ping":true,"msg":"reply with {\\"ok\\":true}"}',
         config=cfg,
     )
     print("✅ Ping response text:", (resp.text or "").strip())
+
+
+def infer_rank_key(obj: Dict[str, Any]) -> Tuple[Optional[str], Optional[list]]:
+    """
+    Find a key like 'top50', 'top100', ... whose value is a list.
+    Prefer the largest topN list if multiple exist.
+    """
+    best_key = None
+    best_list = None
+    best_n = -1
+    for k, v in obj.items():
+        if not isinstance(k, str):
+            continue
+        m = re.fullmatch(r"top(\d+)", k.strip())
+        if not m:
+            continue
+        if not isinstance(v, list):
+            continue
+        n = int(m.group(1))
+        if n > best_n:
+            best_n = n
+            best_key = k
+            best_list = v
+    return best_key, best_list
 
 
 def main():
@@ -134,7 +148,7 @@ def main():
     parser.add_argument("--in", dest="in_path", default=str(DEFAULT_IN), help="Path to gemini_batch.txt")
     parser.add_argument("--out", dest="out_json", default=str(DEFAULT_OUT_JSON), help="Path to output JSON file")
     parser.add_argument("--raw", dest="out_raw", default=str(DEFAULT_OUT_RAW), help="Path to output raw text file")
-    parser.add_argument("--model", dest="model", default=DEFAULT_MODEL, help="Gemini model name (e.g., gemini-2.0-flash)")
+    parser.add_argument("--model", dest="model", default=DEFAULT_MODEL, help="Gemini model name")
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max_output_tokens", type=int, default=8192)
     parser.add_argument("--usage-out", type=str, default="", help="Optional: write usage metadata JSON to this path.")
@@ -143,6 +157,10 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print prompt size + rough token estimate; no API call.")
     parser.add_argument("--ping", action="store_true", help="Send a tiny request to validate billing/quota.")
     parser.add_argument("--mock", type=str, default="", help="Use a local mock JSON file instead of calling Gemini.")
+
+    # NEW: optional expectations for output key
+    parser.add_argument("--rank-n", type=int, default=0, help="Optional: expected rank size, e.g. 100 -> top100.")
+    parser.add_argument("--rank-key", type=str, default="", help="Optional: expected key, e.g. top100.")
 
     args = parser.parse_args()
 
@@ -185,7 +203,6 @@ def main():
         print("✅ Dry-run only. No API call made.")
         return
 
-    # API key presence check (helps avoid confusion)
     if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
         raise SystemExit("Missing GEMINI_API_KEY (or GOOGLE_API_KEY) env var.")
 
@@ -231,8 +248,6 @@ def main():
 
     usage_obj = None
     try:
-        # google-genai response typically exposes usage metadata
-        # We keep this defensive because SDK versions vary.
         um = getattr(resp, "usage_metadata", None)
         if um is not None:
             usage_obj = {
@@ -241,7 +256,6 @@ def main():
                 "total_token_count": getattr(um, "total_token_count", None),
             }
         else:
-            # Some versions expose "usage" or nested dicts
             u = getattr(resp, "usage", None)
             if isinstance(u, dict):
                 usage_obj = u
@@ -253,6 +267,12 @@ def main():
         Path(args.usage_out).write_text(json.dumps(usage_obj, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"✅ Wrote usage: {args.usage_out}")
 
+    # If a previous JSON exists, move it aside so we can't accidentally render stale results.
+    if out_json.exists():
+        bak = out_json.with_suffix(out_json.suffix + ".bak")
+        out_json.replace(bak)
+        print(f"🧹 Moved existing JSON aside: {out_json} -> {bak}")
+
     raw_text = (resp.text or "").strip()
     out_raw.write_text(raw_text, encoding="utf-8")
     print(f"✅ Wrote raw output: {out_raw}")
@@ -261,22 +281,39 @@ def main():
     if not parsed:
         print("⚠️ Could not parse JSON from model output. Inspect raw file:")
         print(f"   {out_raw}")
+
+        # Make sure no stale JSON remains
+        if out_json.exists():
+            out_json.unlink()
+            print(f"🧹 Deleted stale JSON: {out_json}")
         return
 
     out_json.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"✅ Parsed JSON saved: {out_json}")
 
-    top50 = parsed.get("top50")
-    if isinstance(top50, list):
-        print(f"✅ top50 length: {len(top50)}")
-        for i, item in enumerate(top50[:3], start=1):
+    expected_key = ""
+    if args.rank_key.strip():
+        expected_key = args.rank_key.strip()
+    elif args.rank_n and args.rank_n > 0:
+        expected_key = f"top{int(args.rank_n)}"
+
+    # Preview (auto-detect topN list)
+    key, lst = infer_rank_key(parsed)
+    if expected_key and expected_key != key:
+        print(f"⚠️ Expected key '{expected_key}', but detected '{key}'. (Will still preview detected key.)")
+
+    if isinstance(lst, list):
+        print(f"✅ {key} length: {len(lst)}")
+        for i, item in enumerate(lst[:3], start=1):
+            if not isinstance(item, dict):
+                continue
             cid = item.get("cand_id")
             score = item.get("score")
             reason = item.get("reason", "")
             reason_short = (reason[:120] + "…") if isinstance(reason, str) and len(reason) > 120 else reason
             print(f"  {i}. {cid} score={score} reason={reason_short}")
     else:
-        print("⚠️ JSON parsed, but missing expected key 'top50' as a list.")
+        print("⚠️ JSON parsed, but could not find any key like 'top50'/'top100' with a list value.")
 
 
 if __name__ == "__main__":
