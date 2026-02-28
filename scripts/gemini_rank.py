@@ -159,7 +159,7 @@ def main():
     parser.add_argument("--mock", type=str, default="", help="Use a local mock JSON file instead of calling Gemini.")
 
     # NEW: optional expectations for output key
-    parser.add_argument("--rank-n", type=int, default=0, help="Optional: expected rank size, e.g. 100 -> top100.")
+    parser.add_argument("--rank-n", type=int, default=30, help="Optional: expected rank size, e.g. 100 -> top100.")
     parser.add_argument("--rank-key", type=str, default="", help="Optional: expected key, e.g. top100.")
 
     args = parser.parse_args()

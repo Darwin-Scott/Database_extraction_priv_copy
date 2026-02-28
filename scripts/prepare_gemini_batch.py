@@ -319,23 +319,11 @@ def read_job_description_from_prompt() -> str:
 
 
 def build_prompt_json(job_description: str, candidates: List[Dict[str, Any]], rank_n: int = 50, explain_n: int = 20) -> str:
-    """
-    Gemini performs better when:
-    - input is strict JSON (no ad-hoc delimiters)
-    - output schema is explicit and includes reasons + missing as arrays
-    """
     payload = {
         "task": "recruiting_matching_engine",
         "job_description": job_description.strip(),
         "rank_n": rank_n,
         "explain_n": explain_n,
-        "scoring_rubric": [
-            {"dimension": "One Identity Manager experience", "weight": 40},
-            {"dimension": "AD integration / LDAP / directory services", "weight": 25},
-            {"dimension": "SQL", "weight": 15},
-            {"dimension": "Scripting (PowerShell/Python/VB/JS)", "weight": 10},
-            {"dimension": "German + English", "weight": 10},
-        ],
         "constraints": {
             "do_not_invent_facts": True,
             "use_only_candidate_fields": True,
@@ -361,9 +349,18 @@ def build_prompt_json(job_description: str, candidates: List[Dict[str, Any]], ra
         "INPUT: You will receive a JSON payload with a job description and a list of anonymized candidates.",
         "OUTPUT: Return STRICT JSON only. No markdown. No prose outside JSON.",
         f"Return exactly top{rank_n} candidates, unique cand_id values.",
-        f"For the top {explain_n}, provide 1-2 short bullets in reasons AND 0-2 bullets in missing_requirements.",
-        f"For candidates ranked below top {explain_n}, keep reasons/missing_requirements empty arrays.",
-        "Do NOT invent any facts. If something is not present, treat it as unknown.",
+        "",
+        "SCORING RULES (IMPORTANT):",
+        "1) Infer the evaluation criteria ONLY from the job_description.",
+        "2) Identify must-have requirements vs nice-to-have signals from the job_description.",
+        "3) Score candidates 0-100 based on evidence present in candidate fields.",
+        "4) Penalize missing must-haves strongly; do not penalize missing info unless it is required by the job.",
+        "5) Do NOT invent facts. If something is not present, treat it as unknown.",
+        "6) Prefer candidates with the clearest direct evidence for the job requirements.",
+        "",
+        f"EXPLANATIONS:",
+        f"- For the top {explain_n}, provide 1-2 short bullets in reasons AND 0-2 bullets in missing_requirements.",
+        f"- For ranks below top {explain_n}, keep reasons/missing_requirements empty arrays.",
         "",
         "INPUT_JSON:",
         json.dumps(payload, ensure_ascii=False),
@@ -397,7 +394,7 @@ def main() -> None:
     ap.add_argument(
         "--rank-n",
         type=int,
-        default=50,
+        default=30,
         help="How many candidates Gemini should rank in the JSON output (default: 50).",
     )
     ap.add_argument(
