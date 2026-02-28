@@ -132,11 +132,11 @@ def parse_inferred_skills(inferred: Optional[str], limit: int) -> List[str]:
     return out
 
 
-def fmt_languages(languages_json: Optional[str]) -> str:
+def fmt_languages_list(languages_json: Optional[str]) -> List[str]:
     langs = safe_load_json(languages_json, [])
     if not langs:
-        return ""
-    out = []
+        return []
+    out: List[str] = []
     for entry in langs:
         if not isinstance(entry, dict):
             continue
@@ -144,18 +144,19 @@ def fmt_languages(languages_json: Optional[str]) -> str:
         prof = entry.get("proficiency")
         if not name:
             continue
+        name_s = norm_ws(str(name))
         if prof:
-            out.append(f"{norm_ws(str(name))}({norm_ws(str(prof))})")
+            out.append(f"{name_s}({norm_ws(str(prof))})")
         else:
-            out.append(norm_ws(str(name)))
-    return ", ".join(out)
+            out.append(name_s)
+    return out
 
 
-def fmt_work(work_json: Optional[str], limit: int) -> str:
+def fmt_work_list(work_json: Optional[str], limit: int) -> List[str]:
     work = safe_load_json(work_json, [])
     if not work:
-        return ""
-    items = []
+        return []
+    items: List[str] = []
     for w in work[:limit]:
         if not isinstance(w, dict):
             continue
@@ -177,14 +178,14 @@ def fmt_work(work_json: Optional[str], limit: int) -> str:
 
         if base:
             items.append(base)
-    return " ; ".join(items)
+    return items
 
 
-def fmt_edu(edu_json: Optional[str], limit: int) -> str:
+def fmt_edu_list(edu_json: Optional[str], limit: int) -> List[str]:
     edu = safe_load_json(edu_json, [])
     if not edu:
-        return ""
-    items = []
+        return []
+    items: List[str] = []
     for e in edu[:limit]:
         if not isinstance(e, dict):
             continue
@@ -203,7 +204,7 @@ def fmt_edu(edu_json: Optional[str], limit: int) -> str:
         item = "/".join(parts)
         if item:
             items.append(item)
-    return " ; ".join(items)
+    return items
 
 
 def load_top_ids(path: Path) -> List[str]:
@@ -257,7 +258,20 @@ def fetch_profiles(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[str, D
     return out
 
 
-def build_compact_line(row: Dict[str, Any]) -> str:
+def scrub_value(v: Any) -> Any:
+    """Apply scrub_pii to strings recursively (dict/list)."""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return scrub_pii(v)
+    if isinstance(v, list):
+        return [scrub_value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: scrub_value(val) for k, val in v.items()}
+    return v
+
+
+def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
     cid = row["cand_id"]
 
     headline = norm_ws(row["headline"]) if row.get("headline") else ""
@@ -266,30 +280,28 @@ def build_compact_line(row: Dict[str, Any]) -> str:
     skills = parse_skills(row.get("skills_raw"), MAX_SKILLS)
     inferred = parse_inferred_skills(row.get("inferred_skills"), MAX_INFERRED_SKILLS)
 
-    langs = fmt_languages(row.get("languages_json"))
-    work = fmt_work(row.get("work_history_json"), MAX_WORK_ITEMS)
-    edu = fmt_edu(row.get("education_json"), MAX_EDU_ITEMS)
+    langs = fmt_languages_list(row.get("languages_json"))
+    work = fmt_work_list(row.get("work_history_json"), MAX_WORK_ITEMS)
+    edu = fmt_edu_list(row.get("education_json"), MAX_EDU_ITEMS)
 
-    # Pipe-separated; short labels to reduce tokens.
-    parts = [f"{cid}"]
+    obj: Dict[str, Any] = {"cand_id": cid}
     if headline:
-        parts.append(f"H:{headline}")
+        obj["headline"] = headline
     if skills:
-        parts.append(f"S:{', '.join(skills)}")
+        obj["skills"] = skills
     if inferred:
-        parts.append(f"IS:{', '.join(inferred)}")
+        obj["inferred_skills"] = inferred
     if work:
-        parts.append(f"X:{work}")
+        obj["work"] = work
     if edu:
-        parts.append(f"E:{edu}")
+        obj["education"] = edu
     if langs:
-        parts.append(f"L:{langs}")
+        obj["languages"] = langs
     if summary:
-        parts.append(f"Y:{summary}")
+        obj["summary"] = summary
 
-    line = " | ".join(parts)
-    line = scrub_pii(line)
-    return line
+    # Scrub PII safely without touching JSON syntax
+    return scrub_value(obj)
 
 
 def read_job_description_from_prompt() -> str:
@@ -306,28 +318,57 @@ def read_job_description_from_prompt() -> str:
     return "\n".join(lines).strip()
 
 
-def build_prompt(job_description: str, compact_lines: List[str], rank_n: int = 50, explain_n: int = 20) -> str:
-    prompt: List[str] = []
-    prompt.append("TASK: You are a recruiting matching engine.")
-    prompt.append("You will receive a job description and a list of anonymized candidate mini-profiles.")
-    prompt.append("Each candidate is identified ONLY by CAND_ID.")
-    prompt.append("")
-    prompt.append("INSTRUCTIONS:")
-    prompt.append(f"1) Rank the BEST {rank_n} candidates for this job.")
-    if explain_n > 0:
-        prompt.append(f"2) For the TOP {explain_n}, provide 1-2 short sentences explaining fit and missing requirements.")
-    else:
-        prompt.append("2) Do NOT include explanations (reasons can be empty or omitted).")
-    prompt.append("3) Output STRICT JSON only, no markdown.")
-    key = f"top{rank_n}"
-    prompt.append(f'4) JSON format: {{"{key}":[{{"cand_id":"CAND_...","score":0-100,"reason":"..."}}]}}')
-    prompt.append("")
-    prompt.append("JOB_DESCRIPTION:")
-    prompt.append(job_description.strip())
-    prompt.append("")
-    prompt.append("CANDIDATES:")
-    prompt.extend(compact_lines)
-    return "\n".join(prompt)
+def build_prompt_json(job_description: str, candidates: List[Dict[str, Any]], rank_n: int = 50, explain_n: int = 20) -> str:
+    """
+    Gemini performs better when:
+    - input is strict JSON (no ad-hoc delimiters)
+    - output schema is explicit and includes reasons + missing as arrays
+    """
+    payload = {
+        "task": "recruiting_matching_engine",
+        "job_description": job_description.strip(),
+        "rank_n": rank_n,
+        "explain_n": explain_n,
+        "scoring_rubric": [
+            {"dimension": "One Identity Manager experience", "weight": 40},
+            {"dimension": "AD integration / LDAP / directory services", "weight": 25},
+            {"dimension": "SQL", "weight": 15},
+            {"dimension": "Scripting (PowerShell/Python/VB/JS)", "weight": 10},
+            {"dimension": "German + English", "weight": 10},
+        ],
+        "constraints": {
+            "do_not_invent_facts": True,
+            "use_only_candidate_fields": True,
+            "cand_id_unique_in_output": True,
+            "output_exactly_n": rank_n,
+        },
+        "candidates": candidates,
+        "output_schema": {
+            f"top{rank_n}": [
+                {
+                    "cand_id": "CAND_...",
+                    "score": "integer 0-100",
+                    "confidence": "low|medium|high",
+                    "reasons": ["short bullet", "short bullet"],
+                    "missing_requirements": ["short bullet"],
+                }
+            ]
+        },
+    }
+
+    instructions = [
+        "TASK: You are a recruiting matching engine.",
+        "INPUT: You will receive a JSON payload with a job description and a list of anonymized candidates.",
+        "OUTPUT: Return STRICT JSON only. No markdown. No prose outside JSON.",
+        f"Return exactly top{rank_n} candidates, unique cand_id values.",
+        f"For the top {explain_n}, provide 1-2 short bullets in reasons AND 0-2 bullets in missing_requirements.",
+        f"For candidates ranked below top {explain_n}, keep reasons/missing_requirements empty arrays.",
+        "Do NOT invent any facts. If something is not present, treat it as unknown.",
+        "",
+        "INPUT_JSON:",
+        json.dumps(payload, ensure_ascii=False),
+    ]
+    return "\n".join(instructions)
 
 
 def main() -> None:
@@ -401,36 +442,32 @@ def main() -> None:
         profiles = fetch_profiles(conn, cand_ids)
 
     missing = 0
-    compact_rows: List[Dict[str, Any]] = []
-    compact_lines: List[str] = []
+    candidate_objs: List[Dict[str, Any]] = []
 
     for cid in cand_ids:
         row = profiles.get(cid)
         if not row:
             missing += 1
             continue
-        line = build_compact_line(row)
-        compact_lines.append(line)
-        compact_rows.append({"cand_id": cid, "line": line})
+        obj = build_candidate_obj(row)
+        candidate_objs.append(obj)
 
-    # JSONL for debugging
+    # JSONL for debugging (one candidate per line)
     with open(OUT_JSONL_PATH, "w", encoding="utf-8") as f:
-        for obj in compact_rows:
+        for obj in candidate_objs:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
-    prompt_text = build_prompt(job_description, compact_lines, rank_n=args.rank_n, explain_n=args.explain_n)
+    prompt_text = build_prompt_json(job_description, candidate_objs, rank_n=args.rank_n, explain_n=args.explain_n)
     OUT_PROMPT_PATH.write_text(prompt_text, encoding="utf-8")
+
+    print(f"✅ Candidates found in DB: {len(candidate_objs)} (missing {missing})")
+    print(f"\nFirst 3 candidate objs:")
+    for o in candidate_objs[:3]:
+        print("  " + json.dumps(o, ensure_ascii=False)[:400] + ("..." if len(json.dumps(o, ensure_ascii=False)) > 400 else ""))
 
     # Summary
     print(f"✅ Loaded IDs from: {ids_path}")
     print(f"✅ Using top-n IDs: {len(cand_ids)} (requested {args.top_n})")
-    print(f"✅ Candidates found in DB: {len(compact_lines)} (missing {missing})")
-    print(f"✅ Wrote JSONL: {OUT_JSONL_PATH}")
-    print(f"✅ Wrote prompt: {OUT_PROMPT_PATH}")
-    print(f"\nPrompt size (chars): {len(prompt_text):,}")
-    print("\nFirst 3 candidate lines:")
-    for l in compact_lines[:3]:
-        print("  " + l)
 
 
 if __name__ == "__main__":

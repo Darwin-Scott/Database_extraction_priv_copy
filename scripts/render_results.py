@@ -70,6 +70,19 @@ def infer_rank_key(obj: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
     raise ValueError("Input JSON must contain a key like 'top50'/'top100' with a list value.")
 
 
+def _join_bullets(v: Any) -> str:
+    """Convert list[str] bullets or str into a single compact string."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, list):
+        # keep only string-ish entries
+        items = [str(x).strip() for x in v if x is not None and str(x).strip()]
+        return "; ".join(items)
+    return str(v).strip()
+
+
 def load_ranked_list(obj: Dict[str, Any], rank_key: str = "") -> Tuple[str, List[Dict[str, Any]]]:
     if rank_key.strip():
         rk = rank_key.strip()
@@ -88,11 +101,21 @@ def load_ranked_list(obj: Dict[str, Any], rank_key: str = "") -> Tuple[str, List
         cid = item.get("cand_id")
         if not cid:
             continue
+
+        # Backward compatible:
+        # - new format: reasons (list), missing_requirements (list), confidence
+        # - old format: reason (string)
+        reasons = _join_bullets(item.get("reasons", item.get("reason", "")))
+        missing = _join_bullets(item.get("missing_requirements", ""))
+        confidence = str(item.get("confidence", "")).strip() if item.get("confidence") is not None else ""
+
         out.append(
             {
                 "cand_id": str(cid),
                 "score": item.get("score"),
-                "reason": item.get("reason", ""),
+                "confidence": confidence,
+                "reasons": reasons,
+                "missing_requirements": missing,
             }
         )
     return used_key, out
@@ -151,7 +174,19 @@ def parse_json_list(s: Optional[str]) -> List[str]:
 
 
 def render_markdown_table(rows: List[Dict[str, Any]]) -> str:
-    headers = ["rank", "cand_id", "score", "full_name", "headline", "emails", "phones", "profile_url", "reason"]
+    headers = [
+        "rank",
+        "cand_id",
+        "score",
+        "confidence",
+        "full_name",
+        "headline",
+        "emails",
+        "phones",
+        "profile_url",
+        "reasons",
+        "missing_requirements",
+    ]
     md = []
     md.append("| " + " | ".join(headers) + " |")
     md.append("| " + " | ".join(["---"] * len(headers)) + " |")
@@ -210,19 +245,33 @@ def main():
                 "rank": idx,
                 "cand_id": cid,
                 "score": item.get("score"),
-                "reason": item.get("reason", ""),
+                "confidence": item.get("confidence", ""),
+                "reasons": item.get("reasons", ""),
+                "missing_requirements": item.get("missing_requirements", ""),
                 "full_name": d.get("full_name"),
                 "headline": d.get("headline"),
                 "emails": emails,
                 "phones": phones,
                 "profile_url": d.get("profile_url"),
             }
-        )
+    )
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["rank", "cand_id", "score", "full_name", "headline", "emails", "phones", "profile_url", "reason"],
+            fieldnames=[
+                "rank",
+                "cand_id",
+                "score",
+                "confidence",
+                "full_name",
+                "headline",
+                "emails",
+                "phones",
+                "profile_url",
+                "reasons",
+                "missing_requirements",
+            ],
         )
         writer.writeheader()
         writer.writerows(results)
@@ -232,9 +281,12 @@ def main():
     print("✅ Top 10 results (preview):\n")
     for r in results[:10]:
         print(f"{r['rank']:02d}. {r['cand_id']} | score={r['score']} | {r.get('full_name')} | {r.get('headline')}")
-        reason = r.get("reason", "")
-        if isinstance(reason, str) and reason:
-            print("   - " + (reason[:140] + "…" if len(reason) > 140 else reason))
+        reasons = r.get("reasons", "")
+        missing = r.get("missing_requirements", "")
+        if reasons:
+            print("   - reasons: " + (reasons[:140] + "…" if len(reasons) > 140 else reasons))
+        if missing:
+            print("   - missing: " + (missing[:140] + "…" if len(missing) > 140 else missing))
 
     print(f"\n✅ Detected rank key: {used_key}")
     print(f"✅ Wrote CSV: {out_csv}")
