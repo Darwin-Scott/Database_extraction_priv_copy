@@ -30,7 +30,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
 from google.genai import types
@@ -143,13 +143,132 @@ def infer_rank_key(obj: Dict[str, Any]) -> Tuple[Optional[str], Optional[list]]:
     return best_key, best_list
 
 
+def collect_finish_reasons(resp: Any) -> List[str]:
+    reasons: List[str] = []
+    try:
+        for cand in getattr(resp, "candidates", []) or []:
+            finish = getattr(cand, "finish_reason", None)
+            if finish is not None:
+                reasons.append(str(finish))
+    except Exception:
+        pass
+    return reasons
+
+
+def find_rank_key_in_raw(text: str, expected_key: str = "") -> Optional[str]:
+    if expected_key:
+        if re.search(rf'"{re.escape(expected_key)}"\s*:\s*\[', text):
+            return expected_key
+
+    best_key = None
+    best_n = -1
+    for m in re.finditer(r'"(top(\d+))"\s*:\s*\[', text):
+        key = m.group(1)
+        n = int(m.group(2))
+        if n > best_n:
+            best_n = n
+            best_key = key
+    return best_key
+
+
+def recover_list_items_from_truncated_raw(text: str, key: str) -> List[Dict[str, Any]]:
+    """
+    Recover complete JSON objects from a possibly truncated topN array:
+      {"top50":[ {...}, {...}, ... <truncated>
+    """
+    key_match = re.search(rf'"{re.escape(key)}"\s*:\s*\[', text)
+    if not key_match:
+        return []
+
+    arr_start = key_match.end() - 1  # points at "["
+    in_string = False
+    escaped = False
+    depth = 0
+    obj_start: Optional[int] = None
+    items: List[Dict[str, Any]] = []
+
+    for i in range(arr_start + 1, len(text)):
+        ch = text[i]
+
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+            continue
+        if ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and obj_start is not None:
+                    snippet = text[obj_start : i + 1]
+                    try:
+                        obj = json.loads(snippet)
+                        if isinstance(obj, dict):
+                            items.append(obj)
+                    except Exception:
+                        pass
+                    obj_start = None
+            continue
+        if ch == "]" and depth == 0:
+            break
+
+    return items
+
+
+def build_expected_key(rank_key: str, rank_n: int) -> str:
+    if rank_key.strip():
+        return rank_key.strip()
+    if rank_n and rank_n > 0:
+        return f"top{int(rank_n)}"
+    return ""
+
+
+def normalize_rank_payload(obj: Dict[str, Any], expected_key: str, expected_n: int) -> Tuple[Dict[str, Any], str]:
+    key, lst = infer_rank_key(obj)
+    if not key or not isinstance(lst, list):
+        return obj, ""
+
+    out_key = expected_key or key
+
+    cleaned: List[Dict[str, Any]] = []
+    for item in lst:
+        if not isinstance(item, dict):
+            continue
+        cid = item.get("cand_id")
+        if not cid:
+            continue
+        cleaned.append(item)
+
+    note_parts: List[str] = []
+    if expected_n > 0 and len(cleaned) > expected_n:
+        cleaned = cleaned[:expected_n]
+        note_parts.append(f"trimmed list to expected {expected_n}")
+
+    if out_key != key:
+        note_parts.append(f"normalized key '{key}' -> '{out_key}'")
+
+    out = {out_key: cleaned}
+    return out, "; ".join(note_parts)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--in", dest="in_path", default=str(DEFAULT_IN), help="Path to gemini_batch.txt")
     parser.add_argument("--out", dest="out_json", default=str(DEFAULT_OUT_JSON), help="Path to output JSON file")
     parser.add_argument("--raw", dest="out_raw", default=str(DEFAULT_OUT_RAW), help="Path to output raw text file")
     parser.add_argument("--model", dest="model", default=DEFAULT_MODEL, help="Gemini model name")
-    parser.add_argument("--temperature", type=float, default=0.2)
+    parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max_output_tokens", type=int, default=8192)
     parser.add_argument("--usage-out", type=str, default="", help="Optional: write usage metadata JSON to this path.")
 
@@ -167,6 +286,8 @@ def main():
     in_path = Path(args.in_path)
     out_json = Path(args.out_json)
     out_raw = Path(args.out_raw)
+    expected_key = build_expected_key(args.rank_key, args.rank_n)
+    expected_n = int(args.rank_n) if args.rank_n and args.rank_n > 0 else 0
 
     if not in_path.exists():
         raise FileNotFoundError(f"Missing input file: {in_path}. Run scripts/prepare_gemini_batch.py first.")
@@ -262,6 +383,12 @@ def main():
     except Exception:
         usage_obj = None
 
+    finish_reasons = collect_finish_reasons(resp)
+    if finish_reasons:
+        print(f"ℹ️ finish_reason(s): {', '.join(finish_reasons)}")
+    if usage_obj is not None:
+        print(f"ℹ️ usage: {json.dumps(usage_obj, ensure_ascii=False)}")
+
     if args.usage_out and usage_obj is not None:
         Path(args.usage_out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.usage_out).write_text(json.dumps(usage_obj, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -279,23 +406,36 @@ def main():
 
     parsed = extract_json_object(raw_text)
     if not parsed:
-        print("⚠️ Could not parse JSON from model output. Inspect raw file:")
-        print(f"   {out_raw}")
+        recovered_key = find_rank_key_in_raw(raw_text, expected_key=expected_key)
+        recovered_items: List[Dict[str, Any]] = []
+        if recovered_key:
+            recovered_items = recover_list_items_from_truncated_raw(raw_text, recovered_key)
 
-        # Make sure no stale JSON remains
-        if out_json.exists():
-            out_json.unlink()
-            print(f"🧹 Deleted stale JSON: {out_json}")
-        return
+        if recovered_key and recovered_items:
+            if expected_n > 0 and len(recovered_items) > expected_n:
+                recovered_items = recovered_items[:expected_n]
+            out_key = expected_key or recovered_key
+            parsed = {out_key: recovered_items}
+            print(
+                f"⚠️ Recovered {len(recovered_items)} complete items from truncated raw output "
+                f"(key={recovered_key})."
+            )
+        else:
+            print("⚠️ Could not parse JSON from model output. Inspect raw file:")
+            print(f"   {out_raw}")
+
+            # Make sure no stale JSON remains
+            if out_json.exists():
+                out_json.unlink()
+                print(f"🧹 Deleted stale JSON: {out_json}")
+            raise SystemExit(2)
+
+    parsed, note = normalize_rank_payload(parsed, expected_key=expected_key, expected_n=expected_n)
+    if note:
+        print(f"ℹ️ Output normalized: {note}")
 
     out_json.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"✅ Parsed JSON saved: {out_json}")
-
-    expected_key = ""
-    if args.rank_key.strip():
-        expected_key = args.rank_key.strip()
-    elif args.rank_n and args.rank_n > 0:
-        expected_key = f"top{int(args.rank_n)}"
 
     # Preview (auto-detect topN list)
     key, lst = infer_rank_key(parsed)
