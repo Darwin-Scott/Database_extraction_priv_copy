@@ -48,7 +48,7 @@ def search_chroma_inproc(
     print_k: int,
     out_path: Path,
     model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    collection_name: str = "candidates",
+    collection_name: str = "candidates_v1",
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """
