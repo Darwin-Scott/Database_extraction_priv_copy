@@ -25,6 +25,17 @@ def init_db(db_path=DB_PATH, schema_path=SCHEMA_PATH):
         # --- lightweight migrations ---
         add_column_if_missing(conn, "candidate", "source_file", "TEXT")
         add_column_if_missing(conn, "candidate", "source_imported_at", "TEXT")
+        add_column_if_missing(conn, "candidate", "primary_email", "TEXT")
+        add_column_if_missing(conn, "candidate", "primary_phone", "TEXT")
+
+        add_column_if_missing(conn, "candidate_profile_text", "location_name", "TEXT")
+        add_column_if_missing(conn, "candidate_profile_text", "industry", "TEXT")
+        add_column_if_missing(conn, "candidate_profile_text", "current_company", "TEXT")
+        add_column_if_missing(conn, "candidate_profile_text", "current_position", "TEXT")
+        add_column_if_missing(conn, "candidate_profile_text", "badges_job_seeker", "INTEGER")
+        add_column_if_missing(conn, "candidate_profile_text", "badges_open_link", "INTEGER")
+        add_column_if_missing(conn, "candidate_profile_text", "profile_snapshot_at", "TEXT")
+        add_column_if_missing(conn, "candidate_profile_text", "languages_raw", "TEXT")
 
         conn.commit()
 

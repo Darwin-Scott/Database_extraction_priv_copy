@@ -10,16 +10,12 @@ CREATE TABLE IF NOT EXISTS candidate (
   full_name TEXT,
   first_name TEXT,
   last_name TEXT,
+  primary_email TEXT,
+  primary_phone TEXT,
 
   location_name TEXT,
-  industry TEXT,
-
-  address TEXT,
-  avatar TEXT,
-
   emails_json TEXT,
   phones_json TEXT,
-  websites_json TEXT,
 
   source_file TEXT,
   source_imported_at TEXT,
@@ -34,15 +30,38 @@ CREATE TABLE IF NOT EXISTS candidate_profile_text (
   headline TEXT,
   summary TEXT,
   skills_raw TEXT,
+  location_name TEXT,
+  industry TEXT,
+  current_company TEXT,
+  current_position TEXT,
+  badges_job_seeker INTEGER,
+  badges_open_link INTEGER,
+  profile_snapshot_at TEXT,
 
+  languages_raw TEXT,
   languages_json TEXT,
   work_history_json TEXT,
   education_json TEXT,
 
-  tags TEXT,
-  note_public TEXT,
-
   inferred_skills TEXT,
+
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (cand_id) REFERENCES candidate(cand_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS candidate_rank_features (
+  cand_id TEXT PRIMARY KEY,
+
+  work_items_count INTEGER,
+  total_role_months INTEGER,
+  current_role_tenure_months INTEGER,
+  longest_role_months INTEGER,
+  skills_count INTEGER,
+  languages_count INTEGER,
+  education_count INTEGER,
+  has_german INTEGER,
+  has_english INTEGER,
+  profile_age_days INTEGER,
 
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (cand_id) REFERENCES candidate(cand_id) ON DELETE CASCADE

@@ -236,9 +236,27 @@ def fetch_profiles(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[str, D
 
     placeholders = ",".join(["?"] * len(cand_ids))
     query = f"""
-        SELECT cand_id, headline, summary, skills_raw, languages_json, work_history_json, education_json, inferred_skills
-        FROM candidate_profile_text
-        WHERE cand_id IN ({placeholders})
+        SELECT
+            pt.cand_id,
+            pt.headline,
+            pt.summary,
+            pt.skills_raw,
+            pt.location_name,
+            pt.industry,
+            pt.current_company,
+            pt.current_position,
+            pt.badges_job_seeker,
+            pt.badges_open_link,
+            pt.profile_snapshot_at,
+            pt.languages_json,
+            pt.work_history_json,
+            pt.education_json,
+            pt.inferred_skills,
+            rf.total_role_months,
+            rf.current_role_tenure_months
+        FROM candidate_profile_text pt
+        LEFT JOIN candidate_rank_features rf ON rf.cand_id = pt.cand_id
+        WHERE pt.cand_id IN ({placeholders})
     """
     rows = conn.execute(query, cand_ids).fetchall()
 
@@ -250,10 +268,19 @@ def fetch_profiles(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[str, D
             "headline": r[1],
             "summary": r[2],
             "skills_raw": r[3],
-            "languages_json": r[4],
-            "work_history_json": r[5],
-            "education_json": r[6],
-            "inferred_skills": r[7],
+            "location_name": r[4],
+            "industry": r[5],
+            "current_company": r[6],
+            "current_position": r[7],
+            "badges_job_seeker": r[8],
+            "badges_open_link": r[9],
+            "profile_snapshot_at": r[10],
+            "languages_json": r[11],
+            "work_history_json": r[12],
+            "education_json": r[13],
+            "inferred_skills": r[14],
+            "total_role_months": r[15],
+            "current_role_tenure_months": r[16],
         }
     return out
 
@@ -276,6 +303,10 @@ def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
 
     headline = norm_ws(row["headline"]) if row.get("headline") else ""
     summary = clip(row["summary"], MAX_SUMMARY_CHARS) if row.get("summary") else ""
+    location_name = norm_ws(row["location_name"]) if row.get("location_name") else ""
+    industry = norm_ws(row["industry"]) if row.get("industry") else ""
+    current_company = norm_ws(row["current_company"]) if row.get("current_company") else ""
+    current_position = norm_ws(row["current_position"]) if row.get("current_position") else ""
 
     skills = parse_skills(row.get("skills_raw"), MAX_SKILLS)
     inferred = parse_inferred_skills(row.get("inferred_skills"), MAX_INFERRED_SKILLS)
@@ -287,6 +318,8 @@ def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
     obj: Dict[str, Any] = {"cand_id": cid}
     if headline:
         obj["headline"] = headline
+    if current_position or current_company:
+        obj["current_role"] = " at ".join([bit for bit in [current_position, current_company] if bit])
     if skills:
         obj["skills"] = skills
     if inferred:
@@ -299,6 +332,20 @@ def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
         obj["languages"] = langs
     if summary:
         obj["summary"] = summary
+    if location_name:
+        obj["location"] = location_name
+    if industry:
+        obj["industry"] = industry
+    if row.get("badges_job_seeker") is not None:
+        obj["open_to_work"] = bool(row["badges_job_seeker"])
+    if row.get("badges_open_link") is not None:
+        obj["open_to_contact"] = bool(row["badges_open_link"])
+    if row.get("total_role_months") is not None:
+        obj["total_role_months"] = row["total_role_months"]
+    if row.get("current_role_tenure_months") is not None:
+        obj["current_role_tenure_months"] = row["current_role_tenure_months"]
+    if row.get("profile_snapshot_at"):
+        obj["profile_snapshot_at"] = row["profile_snapshot_at"]
 
     # Scrub PII safely without touching JSON syntax
     return scrub_value(obj)

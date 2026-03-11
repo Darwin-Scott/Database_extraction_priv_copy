@@ -15,33 +15,27 @@ tables:
   candidate:
     pii_fields:
       - profile_url
-      - full_name
-      - first_name
-      - last_name
+      - original_full_name
+      - original_first_name
+      - original_last_name
       - location_name
-      - industry
-      - address
-      - avatar
     emails:
       - email
-      - third_party_email_1
-      - third_party_email_2
-      - third_party_email_3
     phones:
       - phone_1
-      - phone_2
-    websites:
-      - website_1
-      - website_2
-      - website_3
 
   candidate_profile_text:
     fields:
       - headline
       - summary
       - skills
-      - tags
-      - note
+      - location_name
+      - industry
+      - original_current_company
+      - original_current_company_position
+      - badges_job_seeker
+      - badges_open_link
+      - mini_profile_actual_at
       - languages
     work_history:
       max_items: 10
@@ -51,15 +45,12 @@ tables:
       start: "organization_start_{i}"
       end: "organization_end_{i}"
     education:
-      max_items: 5
-      school: "education_{i}"
+      max_items: 3
       degree: "education_degree_{i}"
       fos: "education_fos_{i}"
       description: "education_description_{i}"
-      start: "education_start_{i}"
-      end: "education_end_{i}"
     language_list:
-      max_items: 10
+      max_items: 3
       name: "language_{i}"
       proficiency: "language_proficiency_{i}"
 

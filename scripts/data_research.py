@@ -47,6 +47,7 @@ EXAMPLE_COLUMNS = [
     "messenger_provider_2",
     "tags",
     "note",
+    "organization_title_1",
 ]
 
 SPARSITY_THRESHOLD = 0.80

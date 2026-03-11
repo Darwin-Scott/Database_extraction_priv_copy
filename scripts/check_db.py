@@ -1,7 +1,8 @@
-import sqlite3
+import argparse
 import json
-from textwrap import shorten
+import sqlite3
 from collections import OrderedDict
+
 from dbx.paths import DB
 
 DB_PATH = DB
@@ -49,24 +50,27 @@ def print_kv(d: dict, indent=0):
         print(f"{pad}{k}: {v}")
 
 
-def sample_rows(conn, table, limit=2):
+def sample_rows(conn, table, limit=3):
     cur = conn.cursor()
     return cur.execute(f"SELECT * FROM {table} LIMIT {limit};").fetchall()
 
 
-def compact_row(row: sqlite3.Row, width=120):
-    items = []
-    for k in row.keys():
-        v = row[k]
-        if isinstance(v, str):
-            v2 = shorten(v, width=width, placeholder="...")
+def print_full_row(row: sqlite3.Row, row_num: int):
+    print(f"  - row {row_num}")
+    for key in row.keys():
+        value = row[key]
+        if isinstance(value, str):
+            print(f"    {key}: {value}")
         else:
-            v2 = v
-        items.append(f"{k}={v2}")
-    return " | ".join(items)
+            print(f"    {key}: {json.dumps(value, ensure_ascii=False)}")
+    print("")
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Inspect the SQLite DB content and schema.")
+    parser.add_argument("--sample-limit", type=int, default=3, help="Example rows per table.")
+    args = parser.parse_args()
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
 
@@ -142,6 +146,14 @@ def main():
                 JOIN candidate_messages m ON m.cand_id = c.cand_id;
             """)
 
+        if "candidate_rank_features" in tables:
+            cov["rank_features_total"] = safe_scalar(conn, "SELECT COUNT(*) FROM candidate_rank_features;")
+            cov["rank_features_with_total_role_months"] = safe_scalar(conn, """
+                SELECT COUNT(*)
+                FROM candidate_rank_features
+                WHERE total_role_months IS NOT NULL;
+            """)
+
         print_kv(cov)
 
         # --- “Are we deduping?” quick signals ---
@@ -172,15 +184,15 @@ def main():
             print(f"cand_id duplicates found: {dup_id}")
 
         # --- Per-table schema + samples (optional but useful) ---
-        print_header("Samples (first 2 rows per table)")
+        print_header(f"Samples (first {args.sample_limit} rows per table, full values)")
         for t in tables:
             print(f"\n[{t}] rows={counts[t]}")
-            rows = sample_rows(conn, t, limit=2)
+            rows = sample_rows(conn, t, limit=args.sample_limit)
             if not rows:
                 print("  (no rows)")
             else:
-                for r in rows:
-                    print("  - " + compact_row(r))
+                for i, r in enumerate(rows, start=1):
+                    print_full_row(r, i)
 
         # --- Extra: show a few missing-profile examples (actionable debug) ---
         if "candidate" in tables and "candidate_profile_text" in tables:
