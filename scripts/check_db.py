@@ -131,10 +131,10 @@ def main():
                 WHERE pt.cand_id IS NULL;
             """)
 
-            # languages filled
-            cov["profile_text_with_languages_json"] = safe_scalar(conn, """
+        if "candidate" in tables and column_exists(conn, "candidate", "languages_json"):
+            cov["candidate_with_languages_json"] = safe_scalar(conn, """
                 SELECT COUNT(*)
-                FROM candidate_profile_text
+                FROM candidate
                 WHERE languages_json IS NOT NULL AND languages_json != '[]';
             """)
 
@@ -148,10 +148,10 @@ def main():
 
         if "candidate_rank_features" in tables:
             cov["rank_features_total"] = safe_scalar(conn, "SELECT COUNT(*) FROM candidate_rank_features;")
-            cov["rank_features_with_total_role_months"] = safe_scalar(conn, """
+            cov["rank_features_with_listed_role_months_sum"] = safe_scalar(conn, """
                 SELECT COUNT(*)
                 FROM candidate_rank_features
-                WHERE total_role_months IS NOT NULL;
+                WHERE listed_role_months_sum IS NOT NULL;
             """)
 
         print_kv(cov)
@@ -212,12 +212,12 @@ def main():
                     print(f"- {r['cand_id']} | {r['full_name']} | {r['source_file']} | {r['profile_url']}")
 
         # --- Languages examples ---
-        if "candidate_profile_text" in tables:
+        if "candidate" in tables and column_exists(conn, "candidate", "languages_json"):
             print_header("Examples: languages_json filled (up to 5)")
             cur = conn.cursor()
             rows = cur.execute("""
                 SELECT cand_id, languages_json
-                FROM candidate_profile_text
+                FROM candidate
                 WHERE languages_json IS NOT NULL AND languages_json != '[]'
                 LIMIT 5;
             """).fetchall()

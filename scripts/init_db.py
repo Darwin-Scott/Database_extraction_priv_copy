@@ -27,6 +27,8 @@ def init_db(db_path=DB_PATH, schema_path=SCHEMA_PATH):
         add_column_if_missing(conn, "candidate", "source_imported_at", "TEXT")
         add_column_if_missing(conn, "candidate", "primary_email", "TEXT")
         add_column_if_missing(conn, "candidate", "primary_phone", "TEXT")
+        add_column_if_missing(conn, "candidate", "languages_raw", "TEXT")
+        add_column_if_missing(conn, "candidate", "languages_json", "TEXT")
 
         add_column_if_missing(conn, "candidate_profile_text", "location_name", "TEXT")
         add_column_if_missing(conn, "candidate_profile_text", "industry", "TEXT")
@@ -35,7 +37,12 @@ def init_db(db_path=DB_PATH, schema_path=SCHEMA_PATH):
         add_column_if_missing(conn, "candidate_profile_text", "badges_job_seeker", "INTEGER")
         add_column_if_missing(conn, "candidate_profile_text", "badges_open_link", "INTEGER")
         add_column_if_missing(conn, "candidate_profile_text", "profile_snapshot_at", "TEXT")
-        add_column_if_missing(conn, "candidate_profile_text", "languages_raw", "TEXT")
+        add_column_if_missing(conn, "candidate_rank_features", "listed_role_months_sum", "INTEGER")
+        add_column_if_missing(conn, "candidate_rank_features", "current_listed_role_months", "INTEGER")
+        add_column_if_missing(conn, "candidate_rank_features", "longest_listed_role_months", "INTEGER")
+        add_column_if_missing(conn, "candidate_rank_features", "iam_role_months", "INTEGER")
+        add_column_if_missing(conn, "candidate_rank_features", "iam_role_count", "INTEGER")
+        add_column_if_missing(conn, "candidate_rank_features", "current_role_is_iam", "INTEGER")
 
         conn.commit()
 

@@ -36,7 +36,6 @@ tables:
       - badges_job_seeker
       - badges_open_link
       - mini_profile_actual_at
-      - languages
     work_history:
       max_items: 10
       organization: "organization_{i}"

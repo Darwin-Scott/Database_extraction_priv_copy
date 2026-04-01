@@ -132,26 +132,6 @@ def parse_inferred_skills(inferred: Optional[str], limit: int) -> List[str]:
     return out
 
 
-def fmt_languages_list(languages_json: Optional[str]) -> List[str]:
-    langs = safe_load_json(languages_json, [])
-    if not langs:
-        return []
-    out: List[str] = []
-    for entry in langs:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        prof = entry.get("proficiency")
-        if not name:
-            continue
-        name_s = norm_ws(str(name))
-        if prof:
-            out.append(f"{name_s}({norm_ws(str(prof))})")
-        else:
-            out.append(name_s)
-    return out
-
-
 def fmt_work_list(work_json: Optional[str], limit: int) -> List[str]:
     work = safe_load_json(work_json, [])
     if not work:
@@ -248,12 +228,13 @@ def fetch_profiles(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[str, D
             pt.badges_job_seeker,
             pt.badges_open_link,
             pt.profile_snapshot_at,
-            pt.languages_json,
             pt.work_history_json,
             pt.education_json,
             pt.inferred_skills,
-            rf.total_role_months,
-            rf.current_role_tenure_months
+            rf.listed_role_months_sum,
+            rf.current_listed_role_months,
+            rf.iam_role_months,
+            rf.current_role_is_iam
         FROM candidate_profile_text pt
         LEFT JOIN candidate_rank_features rf ON rf.cand_id = pt.cand_id
         WHERE pt.cand_id IN ({placeholders})
@@ -275,12 +256,13 @@ def fetch_profiles(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[str, D
             "badges_job_seeker": r[8],
             "badges_open_link": r[9],
             "profile_snapshot_at": r[10],
-            "languages_json": r[11],
-            "work_history_json": r[12],
-            "education_json": r[13],
-            "inferred_skills": r[14],
-            "total_role_months": r[15],
-            "current_role_tenure_months": r[16],
+            "work_history_json": r[11],
+            "education_json": r[12],
+            "inferred_skills": r[13],
+            "listed_role_months_sum": r[14],
+            "current_listed_role_months": r[15],
+            "iam_role_months": r[16],
+            "current_role_is_iam": r[17],
         }
     return out
 
@@ -310,8 +292,6 @@ def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
 
     skills = parse_skills(row.get("skills_raw"), MAX_SKILLS)
     inferred = parse_inferred_skills(row.get("inferred_skills"), MAX_INFERRED_SKILLS)
-
-    langs = fmt_languages_list(row.get("languages_json"))
     work = fmt_work_list(row.get("work_history_json"), MAX_WORK_ITEMS)
     edu = fmt_edu_list(row.get("education_json"), MAX_EDU_ITEMS)
 
@@ -328,8 +308,6 @@ def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
         obj["work"] = work
     if edu:
         obj["education"] = edu
-    if langs:
-        obj["languages"] = langs
     if summary:
         obj["summary"] = summary
     if location_name:
@@ -340,10 +318,14 @@ def build_candidate_obj(row: Dict[str, Any]) -> Dict[str, Any]:
         obj["open_to_work"] = bool(row["badges_job_seeker"])
     if row.get("badges_open_link") is not None:
         obj["open_to_contact"] = bool(row["badges_open_link"])
-    if row.get("total_role_months") is not None:
-        obj["total_role_months"] = row["total_role_months"]
-    if row.get("current_role_tenure_months") is not None:
-        obj["current_role_tenure_months"] = row["current_role_tenure_months"]
+    if row.get("listed_role_months_sum") is not None:
+        obj["listed_role_months_sum"] = row["listed_role_months_sum"]
+    if row.get("current_listed_role_months") is not None:
+        obj["current_listed_role_months"] = row["current_listed_role_months"]
+    if row.get("iam_role_months") is not None:
+        obj["iam_role_months"] = row["iam_role_months"]
+    if row.get("current_role_is_iam") is not None:
+        obj["current_role_is_iam"] = bool(row["current_role_is_iam"])
     if row.get("profile_snapshot_at"):
         obj["profile_snapshot_at"] = row["profile_snapshot_at"]
 

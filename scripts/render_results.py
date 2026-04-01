@@ -136,8 +136,7 @@ def fetch_candidate_data(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[
       c.location_name,
       c.industry,
       pt.headline,
-      pt.skills_raw,
-      pt.languages_json
+      pt.skills_raw
     FROM candidate c
     LEFT JOIN candidate_profile_text pt ON pt.cand_id = c.cand_id
     WHERE c.cand_id IN ({placeholders})
@@ -156,7 +155,6 @@ def fetch_candidate_data(conn: sqlite3.Connection, cand_ids: List[str]) -> Dict[
             "industry": r[6],
             "headline": r[7],
             "skills_raw": r[8],
-            "languages_json": r[9],
         }
     return out
 

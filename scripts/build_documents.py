@@ -101,26 +101,6 @@ def parse_inferred_skills(inferred: Optional[str], limit: int = MAX_INFERRED_SKI
     return cleaned
 
 
-def fmt_languages(languages_json: Optional[str]) -> str:
-    languages = safe_load_json(languages_json, [])
-    if not languages:
-        return ""
-
-    output = []
-    for entry in languages:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        proficiency = entry.get("proficiency")
-        if not name:
-            continue
-        if proficiency:
-            output.append(f"{norm_ws(str(name))} ({norm_ws(str(proficiency))})")
-        else:
-            output.append(norm_ws(str(name)))
-    return ", ".join(output)
-
-
 def fmt_work(work_json: Optional[str], limit: int = MAX_WORK_ITEMS) -> str:
     work = safe_load_json(work_json, [])
     if not work:
@@ -191,15 +171,16 @@ def build_document(
     industry: Optional[str],
     current_company: Optional[str],
     current_position: Optional[str],
-    languages_json: Optional[str],
     work_history_json: Optional[str],
     education_json: Optional[str],
     badges_job_seeker: Optional[int],
     badges_open_link: Optional[int],
     profile_snapshot_at: Optional[str],
     inferred_skills: Optional[str],
-    total_role_months: Optional[int],
-    current_role_tenure_months: Optional[int],
+    listed_role_months_sum: Optional[int],
+    current_listed_role_months: Optional[int],
+    iam_role_months: Optional[int],
+    current_role_is_iam: Optional[int],
 ) -> Tuple[str, Dict[str, Any]]:
     headline_text = norm_ws(headline) if headline else ""
     summary_text = clip(summary, MAX_SUMMARY_CHARS) if summary else ""
@@ -210,7 +191,6 @@ def build_document(
 
     skills_list = parse_skills(skills_raw)
     inferred_list = parse_inferred_skills(inferred_skills)
-    languages_text = fmt_languages(languages_json)
     work_text = fmt_work(work_history_json)
     education_text = fmt_education(education_json)
 
@@ -230,8 +210,6 @@ def build_document(
         parts.append(f"Experience: {work_text}")
     if education_text:
         parts.append(f"Education: {education_text}")
-    if languages_text:
-        parts.append(f"Languages: {languages_text}")
     if location_text:
         parts.append(f"Location: {location_text}")
     if industry_text:
@@ -246,12 +224,13 @@ def build_document(
         "n_inferred_skills": len(inferred_list),
         "has_work": bool(work_text),
         "has_education": bool(education_text),
-        "has_languages": bool(languages_text),
         "badges_job_seeker": bool(badges_job_seeker),
         "badges_open_link": bool(badges_open_link),
         "profile_snapshot_at": profile_snapshot_at or "",
-        "total_role_months": total_role_months,
-        "current_role_tenure_months": current_role_tenure_months,
+        "listed_role_months_sum": listed_role_months_sum,
+        "current_listed_role_months": current_listed_role_months,
+        "iam_role_months": iam_role_months,
+        "current_role_is_iam": current_role_is_iam,
     }
     return text, meta
 
@@ -270,15 +249,16 @@ def fetch_candidates(conn: sqlite3.Connection) -> List[sqlite3.Row]:
           pt.industry,
           pt.current_company,
           pt.current_position,
-          pt.languages_json,
           pt.work_history_json,
           pt.education_json,
           pt.badges_job_seeker,
           pt.badges_open_link,
           pt.profile_snapshot_at,
           pt.inferred_skills,
-          rf.total_role_months,
-          rf.current_role_tenure_months
+          rf.listed_role_months_sum,
+          rf.current_listed_role_months,
+          rf.iam_role_months,
+          rf.current_role_is_iam
         FROM candidate_profile_text pt
         LEFT JOIN candidate_rank_features rf ON rf.cand_id = pt.cand_id
         ORDER BY pt.cand_id
@@ -305,15 +285,16 @@ def main(db_path: str = DB_PATH):
                 industry=row["industry"],
                 current_company=row["current_company"],
                 current_position=row["current_position"],
-                languages_json=row["languages_json"],
                 work_history_json=row["work_history_json"],
                 education_json=row["education_json"],
                 badges_job_seeker=row["badges_job_seeker"],
                 badges_open_link=row["badges_open_link"],
                 profile_snapshot_at=row["profile_snapshot_at"],
                 inferred_skills=row["inferred_skills"],
-                total_role_months=row["total_role_months"],
-                current_role_tenure_months=row["current_role_tenure_months"],
+                listed_role_months_sum=row["listed_role_months_sum"],
+                current_listed_role_months=row["current_listed_role_months"],
+                iam_role_months=row["iam_role_months"],
+                current_role_is_iam=row["current_role_is_iam"],
             )
             handle.write(json.dumps({"cand_id": row["cand_id"], "text": text, "meta": meta}, ensure_ascii=False) + "\n")
             if len(examples) < 3:
