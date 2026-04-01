@@ -150,6 +150,7 @@ def main() -> None:
 
     ap.add_argument("--build-docs", action="store_true", help="Build candidates.jsonl from SQLite (scripts/build_documents.py).")
     ap.add_argument("--index", action="store_true", help="Index candidates.jsonl into Chroma (scripts/index_chroma.py).")
+    ap.add_argument("--feature-engineering", action="store_true", help="Build candidate_profile_text and candidate_rank_features from raw imports.")
 
     ap.add_argument("--search", type=str, default="", help="Semantic search query (scripts/search_chroma.py). Writes top{K}_ids.txt.")
     ap.add_argument("--job", type=str, default="", help="Job description text for gemini batch prompt.")
@@ -191,6 +192,7 @@ def main() -> None:
     if args.all:
         args.init_db = True
         args.import_csv = True
+        args.feature_engineering = True
         args.build_docs = True
         args.index = True
         if not args.search:
@@ -236,6 +238,9 @@ def main() -> None:
         import_script = SCRIPTS / "import_csv.py"
         for p in csv_paths:
             run([py, str(import_script), str(p)], cwd=ROOT)
+
+    if args.feature_engineering:
+        run([py, str(SCRIPTS / "feature_engineering.py")], cwd=ROOT)
 
     if args.build_docs:
         run([py, str(SCRIPTS / "build_documents.py")], cwd=ROOT)

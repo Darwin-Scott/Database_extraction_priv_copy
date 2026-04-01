@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS candidate_profile_text (
   FOREIGN KEY (cand_id) REFERENCES candidate(cand_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS candidate_raw_import (
+  cand_id TEXT PRIMARY KEY,
+  raw_profile_json TEXT NOT NULL,
+  source_file TEXT,
+  source_imported_at TEXT,
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (cand_id) REFERENCES candidate(cand_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS candidate_rank_features (
   cand_id TEXT PRIMARY KEY,
 

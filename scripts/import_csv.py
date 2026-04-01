@@ -1,6 +1,5 @@
 import csv
 import json
-import re
 import sqlite3
 import sys
 from datetime import datetime
@@ -28,16 +27,6 @@ def clean_value(value):
     return value
 
 
-def collect_list(row, cols):
-    values = []
-    for col in cols:
-        if col in row:
-            value = clean_value(row[col])
-            if value is not None:
-                values.append(value)
-    return values
-
-
 def first_present(*values):
     for value in values:
         cleaned = clean_value(value)
@@ -46,19 +35,14 @@ def first_present(*values):
     return None
 
 
-def build_pattern_items(row, spec, max_items):
-    items = []
-    for index in range(1, max_items + 1):
-        item = {}
-        for key, pattern in spec.items():
-            col = pattern.format(i=index)
-            if col in row:
-                value = clean_value(row[col])
-                if value is not None:
-                    item[key] = value
-        if item:
-            items.append(item)
-    return items
+def collect_list(row, cols):
+    values = []
+    for col in cols:
+        if col in row:
+            value = clean_value(row[col])
+            if value is not None:
+                values.append(value)
+    return values
 
 
 def build_languages(row, max_items=3):
@@ -79,157 +63,8 @@ def build_languages(row, max_items=3):
     return [{"name": fallback}] if fallback else []
 
 
-def clean_skill_token(token):
-    token = clean_value(token)
-    if token is None:
-        return None
-    token = re.sub(r"\s*:\s*(null|none|\d+)\s*$", "", token, flags=re.IGNORECASE)
-    token = token.strip()
-    return token if token else None
-
-
-def count_skills(skills_raw):
-    skills_raw = clean_value(skills_raw)
-    if skills_raw is None:
-        return 0
-
-    seen = set()
-    for part in str(skills_raw).split(","):
-        token = clean_skill_token(part)
-        if token is not None:
-            seen.add(token.lower())
-    return len(seen)
-
-
-def parse_year_month(value):
-    value = clean_value(value)
-    if value is None:
-        return None
-
-    match = re.match(r"^\s*(\d{4})(?:\D+(\d{1,2}))?", str(value))
-    if not match:
-        return None
-
-    year = int(match.group(1))
-    month = int(match.group(2) or 1)
-    month = min(max(month, 1), 12)
-    return year, month
-
-
-def months_inclusive(start_ym, end_ym):
-    if start_ym is None or end_ym is None:
-        return None
-
-    diff = (end_ym[0] - start_ym[0]) * 12 + (end_ym[1] - start_ym[1])
-    if diff < 0:
-        return None
-    return diff + 1
-
-
-def parse_iso_datetime(value):
-    value = clean_value(value)
-    if value is None:
-        return None
-
-    try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
-        return dt
-    except ValueError:
-        return None
-
-
-IAM_KEYWORDS = [
-    "identity and access management",
-    "identity management",
-    "access management",
-    "one identity",
-    "oneidentity",
-    "active directory",
-    "berechtigungsmanagement",
-    "sailpoint",
-    "saviynt",
-    "dirx",
-    "bi-cube",
-    "bicube",
-    "ldap",
-    "provisioning",
-    "rezertifizierung",
-    "recertification",
-    "joiner",
-    "mover",
-    "leaver",
-]
-
-
-def looks_like_iam_role(item):
-    haystack = " ".join(
-        str(item.get(key, "")).strip().lower()
-        for key in ("organization", "title", "description")
-        if item.get(key)
-    )
-    return any(keyword in haystack for keyword in IAM_KEYWORDS)
-
-
-def build_rank_features(work_items, education_items, skills_raw, profile_snapshot_at, imported_at):
-    duration_reference_dt = parse_iso_datetime(profile_snapshot_at) or parse_iso_datetime(imported_at) or datetime.utcnow()
-    freshness_reference_dt = parse_iso_datetime(imported_at) or datetime.utcnow()
-    reference_ym = (duration_reference_dt.year, duration_reference_dt.month)
-
-    durations = []
-    iam_role_months = 0
-    iam_role_count = 0
-    for item in work_items:
-        start_ym = parse_year_month(item.get("start"))
-        end_ym = parse_year_month(item.get("end")) or reference_ym
-        duration = months_inclusive(start_ym, end_ym)
-        if duration is not None:
-            durations.append(duration)
-            if looks_like_iam_role(item):
-                iam_role_months += duration
-                iam_role_count += 1
-
-    current_listed_role_months = None
-    current_role_is_iam = None
-    if work_items:
-        current_start = parse_year_month(work_items[0].get("start"))
-        current_end = parse_year_month(work_items[0].get("end")) or reference_ym
-        current_listed_role_months = months_inclusive(current_start, current_end)
-        current_role_is_iam = int(looks_like_iam_role(work_items[0]))
-
-    profile_age_days = None
-    profile_snapshot_dt = parse_iso_datetime(profile_snapshot_at)
-    if profile_snapshot_dt is not None:
-        profile_age_days = max((freshness_reference_dt - profile_snapshot_dt).days, 0)
-
-    return {
-        "work_items_count": len(work_items),
-        "listed_role_months_sum": sum(durations) if durations else None,
-        "current_listed_role_months": current_listed_role_months,
-        "longest_listed_role_months": max(durations) if durations else None,
-        "iam_role_months": iam_role_months if iam_role_count else None,
-        "iam_role_count": iam_role_count,
-        "current_role_is_iam": current_role_is_iam,
-        "skills_count": count_skills(skills_raw),
-        "education_count": len(education_items),
-        "profile_age_days": profile_age_days,
-    }
-
-
-def bool_to_int(value):
-    value = clean_value(value)
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return int(value)
-
-    text = str(value).strip().lower()
-    if text in {"true", "1", "yes", "y"}:
-        return 1
-    if text in {"false", "0", "no", "n"}:
-        return 0
-    return None
+def normalize_row_dict(raw_row: dict) -> dict:
+    return {key: clean_value(value) for key, value in raw_row.items()}
 
 
 def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_db=False):
@@ -250,7 +85,6 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
     unique_key = cfg["dedupe"]["unique_key"]
     prefix = cfg["id"]["prefix"]
     width = int(cfg["id"]["width"])
-
     imported_at = datetime.now().isoformat(timespec="seconds")
     source_file = str(csv_path.name)
 
@@ -261,6 +95,7 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
             conn.execute("DELETE FROM candidate_messages;")
             conn.execute("DELETE FROM candidate_rank_features;")
             conn.execute("DELETE FROM candidate_profile_text;")
+            conn.execute("DELETE FROM candidate_raw_import;")
             conn.execute("DELETE FROM candidate;")
             conn.commit()
             print("Reset enabled: cleared existing tables before import.")
@@ -269,13 +104,16 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
 
         inserted = 0
         updated = 0
+        rows_with_unique_key = 0
 
-        for _, row in dataframe.iterrows():
-            row = row.to_dict()
+        for _, raw_row in dataframe.iterrows():
+            raw_row = raw_row.to_dict()
+            row = normalize_row_dict(raw_row)
 
-            profile_url = clean_value(row.get(unique_key))
+            profile_url = row.get(unique_key)
             if not profile_url:
                 continue
+            rows_with_unique_key += 1
 
             if profile_url in existing:
                 cand_id = existing[profile_url]
@@ -287,17 +125,16 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
                 is_update = False
 
             cand_cfg = cfg["tables"]["candidate"]
-            pii_data = {key: clean_value(row.get(key)) for key in cand_cfg["pii_fields"]}
-
+            pii_data = {key: row.get(key) for key in cand_cfg["pii_fields"]}
             emails = collect_list(row, cand_cfg["emails"])
             phones = collect_list(row, cand_cfg["phones"])
 
             full_name = first_present(row.get("original_full_name"), row.get("full_name"))
             first_name = first_present(row.get("original_first_name"), row.get("first_name"))
             last_name = first_present(row.get("original_last_name"), row.get("last_name"))
-            primary_email = clean_value(row.get("email"))
-            primary_phone = clean_value(row.get("phone_1"))
-            languages_raw = clean_value(row.get("languages"))
+            primary_email = row.get("email")
+            primary_phone = row.get("phone_1")
+            languages_raw = row.get("languages")
             languages_json = build_languages(row, max_items=cfg["tables"]["candidate_profile_text"]["language_list"]["max_items"])
 
             conn.execute(
@@ -306,8 +143,7 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
                   cand_id, profile_url, full_name, first_name, last_name,
                   primary_email, primary_phone, languages_raw, languages_json,
                   location_name, emails_json, phones_json,
-                  source_file, source_imported_at,
-                  updated_at
+                  source_file, source_imported_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(profile_url) DO UPDATE SET
@@ -343,131 +179,28 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
                 ),
             )
 
-            prof_cfg = cfg["tables"]["candidate_profile_text"]
-
-            headline = clean_value(row.get("headline"))
-            summary = clean_value(row.get("summary"))
-            skills = clean_value(row.get("skills"))
-            location_name = clean_value(row.get("location_name"))
-            industry = clean_value(row.get("industry"))
-            current_company = first_present(row.get("original_current_company"), row.get("current_company"))
-            current_position = first_present(row.get("original_current_company_position"), row.get("current_company_position"))
-            badges_job_seeker = bool_to_int(row.get("badges_job_seeker"))
-            badges_open_link = bool_to_int(row.get("badges_open_link"))
-            profile_snapshot_at = clean_value(row.get("mini_profile_actual_at"))
-
-            work_items = build_pattern_items(
-                row,
-                {
-                    "organization": prof_cfg["work_history"]["organization"],
-                    "title": prof_cfg["work_history"]["title"],
-                    "description": prof_cfg["work_history"]["description"],
-                    "start": prof_cfg["work_history"]["start"],
-                    "end": prof_cfg["work_history"]["end"],
-                },
-                prof_cfg["work_history"]["max_items"],
-            )
-
-            edu_items = build_pattern_items(
-                row,
-                {
-                    "degree": prof_cfg["education"]["degree"],
-                    "fos": prof_cfg["education"]["fos"],
-                    "description": prof_cfg["education"]["description"],
-                },
-                prof_cfg["education"]["max_items"],
-            )
-
             conn.execute(
                 """
-                INSERT INTO candidate_profile_text (
-                  cand_id, headline, summary, skills_raw,
-                  location_name, industry, current_company, current_position,
-                  badges_job_seeker, badges_open_link, profile_snapshot_at,
-                  work_history_json, education_json,
-                  inferred_skills, updated_at
+                INSERT INTO candidate_raw_import (
+                  cand_id, raw_profile_json, source_file, source_imported_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))
+                VALUES (?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(cand_id) DO UPDATE SET
-                  headline=excluded.headline,
-                  summary=excluded.summary,
-                  skills_raw=excluded.skills_raw,
-                  location_name=excluded.location_name,
-                  industry=excluded.industry,
-                  current_company=excluded.current_company,
-                  current_position=excluded.current_position,
-                  badges_job_seeker=excluded.badges_job_seeker,
-                  badges_open_link=excluded.badges_open_link,
-                  profile_snapshot_at=excluded.profile_snapshot_at,
-                  work_history_json=excluded.work_history_json,
-                  education_json=excluded.education_json,
+                  raw_profile_json=excluded.raw_profile_json,
+                  source_file=excluded.source_file,
+                  source_imported_at=excluded.source_imported_at,
                   updated_at=datetime('now')
                 """,
                 (
                     cand_id,
-                    headline,
-                    summary,
-                    skills,
-                    location_name,
-                    industry,
-                    current_company,
-                    current_position,
-                    badges_job_seeker,
-                    badges_open_link,
-                    profile_snapshot_at,
-                    json.dumps(work_items, ensure_ascii=False),
-                    json.dumps(edu_items, ensure_ascii=False),
-                ),
-            )
-
-            rank_features = build_rank_features(
-                work_items=work_items,
-                education_items=edu_items,
-                skills_raw=skills,
-                profile_snapshot_at=profile_snapshot_at,
-                imported_at=imported_at,
-            )
-
-            conn.execute(
-                """
-                INSERT INTO candidate_rank_features (
-                  cand_id, work_items_count, listed_role_months_sum,
-                  current_listed_role_months, longest_listed_role_months,
-                  iam_role_months, iam_role_count, current_role_is_iam,
-                  skills_count, education_count, profile_age_days, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                ON CONFLICT(cand_id) DO UPDATE SET
-                  work_items_count=excluded.work_items_count,
-                  listed_role_months_sum=excluded.listed_role_months_sum,
-                  current_listed_role_months=excluded.current_listed_role_months,
-                  longest_listed_role_months=excluded.longest_listed_role_months,
-                  iam_role_months=excluded.iam_role_months,
-                  iam_role_count=excluded.iam_role_count,
-                  current_role_is_iam=excluded.current_role_is_iam,
-                  skills_count=excluded.skills_count,
-                  education_count=excluded.education_count,
-                  profile_age_days=excluded.profile_age_days,
-                  updated_at=datetime('now')
-                """,
-                (
-                    cand_id,
-                    rank_features["work_items_count"],
-                    rank_features["listed_role_months_sum"],
-                    rank_features["current_listed_role_months"],
-                    rank_features["longest_listed_role_months"],
-                    rank_features["iam_role_months"],
-                    rank_features["iam_role_count"],
-                    rank_features["current_role_is_iam"],
-                    rank_features["skills_count"],
-                    rank_features["education_count"],
-                    rank_features["profile_age_days"],
+                    json.dumps(row, ensure_ascii=False),
+                    source_file,
+                    imported_at,
                 ),
             )
 
             msg_cfg = cfg["tables"]["candidate_messages"]["fields"]
-            msg_data = {key: clean_value(row.get(key)) for key in msg_cfg}
-
+            msg_data = {key: row.get(key) for key in msg_cfg}
             if any(value is not None for value in msg_data.values()):
                 conn.execute(
                     """
@@ -506,6 +239,22 @@ def import_csv_to_sqlite(csv_path, db_path=DB, config_path="config.yml", reset_d
             else:
                 inserted += 1
 
+        conn.execute(
+            """
+            INSERT INTO import_journal (
+              source_file, imported_at, rows_read, rows_with_unique_key, inserted, updated
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source_file,
+                imported_at,
+                int(len(dataframe)),
+                int(rows_with_unique_key),
+                int(inserted),
+                int(updated),
+            ),
+        )
         conn.commit()
 
     print(f"Import done. Inserted: {inserted}, Updated (deduped): {updated}, Rows read: {len(dataframe)}")

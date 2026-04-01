@@ -274,7 +274,14 @@ if import_btn:
             st.error(f"Import failed for {p.name}. See logs.")
             st.stop()
 
-    st.success("CSV import finished.")
+    append_log("=== feature_engineering.py ===")
+    rc, out = run_cmd([py, str(SCRIPTS / "feature_engineering.py")])
+    append_log(out)
+    if rc != 0:
+        st.error("feature_engineering.py failed. See logs.")
+        st.stop()
+
+    st.success("CSV import + feature engineering finished.")
 
 st.divider()
 

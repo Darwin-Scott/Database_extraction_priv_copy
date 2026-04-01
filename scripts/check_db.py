@@ -131,6 +131,9 @@ def main():
                 WHERE pt.cand_id IS NULL;
             """)
 
+        if "candidate_raw_import" in tables:
+            cov["raw_import_total"] = safe_scalar(conn, "SELECT COUNT(*) FROM candidate_raw_import;")
+
         if "candidate" in tables and column_exists(conn, "candidate", "languages_json"):
             cov["candidate_with_languages_json"] = safe_scalar(conn, """
                 SELECT COUNT(*)
